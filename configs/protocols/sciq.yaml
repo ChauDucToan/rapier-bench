@@ -1,0 +1,38 @@
+- id: "sciq_evidence_grounded"
+  name: "SciQ Evidence Grounded Protocol"
+  version: "1.0.0"
+  dataset_id: "sciq"
+  domain: "education"
+  task_type: "multiple_choice"
+  prompt_template: |
+    Context: {support}
+    Question: {question}
+
+    Choices:
+    A: {choice_a}
+    B: {choice_b}
+    C: {choice_c}
+    D: {choice_d}
+
+    Answer with only the correct choice letter (A, B, C, or D).
+  expected_answer_format: "single_letter"
+  options: ["A", "B", "C", "D"]
+
+- id: "sciq_closed_book"
+  name: "SciQ Closed Book Protocol"
+  version: "1.0.0"
+  dataset_id: "sciq"
+  domain: "education"
+  task_type: "multiple_choice"
+  prompt_template: |
+    Question: {question}
+
+    Choices:
+    A: {choice_a}
+    B: {choice_b}
+    C: {choice_c}
+    D: {choice_d}
+
+    Answer with only the correct choice letter (A, B, C, or D).
+  expected_answer_format: "single_letter"
+  options: ["A", "B", "C", "D"]

@@ -1,0 +1,144 @@
+# Rapier Bench: Dataset Registry Configurations
+# Protocols, sources, schemas, and metrics verified in docs/EVALUATION_PROTOCOL.md
+
+- id: "sciq"
+  name: "SciQ Science QA"
+  hf_id: "allenai/sciq"
+  revision: "main"
+  domain: "education"
+  task_type: "multiple_choice"
+  evaluator_key: "sciq_evaluator"
+  default_split: "test"
+  splits:
+    train: 11679
+    validation: 1000
+    test: 1000 # 884 eligible for evidence-grounded (support != ""); 1000 eligible for closed-book
+  metrics:
+    - "accuracy"
+    - "invalid_parsed_rate"
+  default_protocol_id: "sciq_evidence_grounded"
+  sampling_modes:
+    smoke: 10
+    pilot: 25
+    standard: 100
+    full: 1000
+
+- id: "wdc_pave"
+  name: "WDC-PAVE Product Attribute-Value Extraction"
+  source: "github_raw_jsonl"
+  raw_url: "https://raw.githubusercontent.com/wbsg-uni-mannheim/wdc-pave/main/data/processed_datasets/wdc_with_all_attributes/test.jsonl"
+  upstream_repo: "https://github.com/wbsg-uni-mannheim/wdc-pave"
+  domain: "ecommerce"
+  task_type: "attribute_value_extraction"
+  evaluator_key: "wdc_pave_evaluator"
+  default_split: "test"
+  splits:
+    test: 354 # Canonical official upstream test set (raw JSONL fetch, zero HF datasets load)
+  row_schema:
+    - "id"
+    - "category"
+    - "input_title"
+    - "input_description"
+    - "target_scores"
+  schema_notes: |
+    target_scores maps attribute_name to {"n/a": 1} or {value_string: {"pid": [...], "score": 1}}.
+    Nested attribute-value representation is preserved. Multi-valued attributes supported.
+    Absent attribute or "n/a" target equals null.
+    CRITICAL EVALUATION RULE: "n/a" predictions NEVER count as true positives (VC).
+  fallback_source:
+    hf_id: "siavashsaki/wdc-pave-ave"
+    split: "test"
+    rows: 284
+    note: "third-party re-upload, 284 rows, schema-shifted"
+  metrics:
+    - "micro_f1"
+    - "micro_precision"
+    - "micro_recall"
+    - "json_validity_rate"
+    - "missing_attr_rate"
+    - "unsupported_attr_rate"
+    - "parse_failure_rate"
+  default_protocol_id: "wdc_pave_extraction"
+  sampling_modes:
+    smoke: 10
+    pilot: 25
+    standard: 100
+    full: 354
+
+- id: "legalbench_contract_nli"
+  name: "LegalBench Contract NLI Subset"
+  hf_id: "nguha/legalbench"
+  revision: "main"
+  domain: "legal"
+  task_type: "binary_classification"
+  evaluator_key: "legalbench_contract_nli_evaluator"
+  default_split: "test"
+  download_isolation_note: "Each contract_nli_* config downloads only its own 24-48 KB standalone parquet shard"
+  documented_subtasks:
+    - "contract_nli_confidentiality_of_agreement" # 82 test samples (24 KB parquet)
+    - "contract_nli_limited_use"                   # 208 test samples (46 KB parquet)
+    - "contract_nli_notice_on_compelled_disclosure" # 142 test samples (36 KB parquet)
+    - "contract_nli_permissible_acquirement_of_similar_information" # 178 test samples (40 KB parquet)
+    - "contract_nli_sharing_with_third-parties"    # 180 test samples (47 KB parquet)
+  metrics:
+    - "balanced_accuracy"
+    - "accuracy"
+    - "yes_recall"
+    - "no_recall"
+    - "aggregate_macro_balanced_accuracy"
+  default_protocol_id: "legalbench_contract_nli_binary"
+  sampling_modes:
+    smoke: 10
+    pilot: 25
+    standard: 100
+    full: 790
+
+- id: "ifeval"
+  name: "IFEval Instruction Following Evaluation"
+  hf_id: "google/IFEval"
+  revision: "main"
+  domain: "general"
+  task_type: "instruction_following"
+  evaluator_key: "ifeval_evaluator"
+  default_split: "train"
+  splits:
+    train: 541
+  metrics:
+    - "prompt_level_strict_acc"
+    - "prompt_level_loose_acc"
+    - "inst_level_strict_acc"
+    - "inst_level_loose_acc"
+  default_protocol_id: "ifeval_default"
+  sampling_modes:
+    smoke: 10
+    pilot: 25
+    standard: 100
+    full: 541
+
+- id: "faitheval"
+  name: "FaithEval Contextual Faithfulness"
+  hf_id: "Salesforce/FaithEval-unanswerable-v1.0"
+  revision: "main"
+  domain: "contextual_faithfulness"
+  task_type: "contextual_faithfulness"
+  evaluator_key: "faitheval_evaluator"
+  default_split: "test"
+  splits:
+    test: 2492 # Unanswerable test split
+  answerable_control:
+    type: "project_protocol_addition"
+    note: "Project protocol addition (not an official FaithEval metric) to guard against trivial always-abstain models"
+    dataset_id: "rajpurkar/squad"
+    split: "validation"
+    sampling_rule: "SHA256(f'{dataset_id}:{split}:{seed}:{stable_id}')" # Canonical project formula (dataset_id='rajpurkar/squad')
+    rejected_alternative: "alvinming/FaithEval-unanswerable-v1.0-w-original_context REJECTED: answers field contains only refusal strings without extractive gold answers"
+  metrics:
+    - "unanswerable_context_accuracy"
+    - "answerable_control_accuracy"
+    - "balanced_faithfulness_score"
+  default_protocol_id: "faitheval_unanswerable_v1"
+  sampling_modes:
+    smoke: 10
+    pilot: 25
+    standard: 100
+    full: 2492

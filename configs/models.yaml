@@ -1,0 +1,70 @@
+# Rapier Bench: Model Registry Configurations
+# Pinned versions, SHAs, and quirks verified in docs/MODEL_COMPATIBILITY.md
+
+- id: "lumma-0.6b"
+  name: "Lumma 0.6B Instruct"
+  hf_id: "FrontiersMind/Lumma-0.6B-Instruct"
+  revision: "668bc2f2ad9f3858d047e0e39ae57a7ad84effc2"
+  parameters: 649281964
+  context_length: 12288
+  vocab_size: 131072
+  torch_dtype: "bfloat16"
+  attn_implementation: "sdpa"
+  device_policy: "cuda"
+  trust_remote_code: true
+  model_type: "Lumma"
+  architecture: "LummaForCausalLM"
+  chat_template_mode: "jinja"
+  add_generation_prompt: false # QUIRK: Jinja template unconditionally emits <|assistant|>\n; True causes duplicate token
+  license: "Apache-2.0"
+  vram_weight_gb: 1.30
+  generation_defaults:
+    do_sample: false
+    temperature: 0.0
+    max_new_tokens: 512
+    repetition_penalty: 1.0
+
+- id: "apertus-0.5b"
+  name: "Apertus v1.1 0.5B Instruct"
+  hf_id: "swiss-ai/Apertus-v1.1-0.5B-Instruct"
+  revision: "a140fd61fb57422c36a26301caea17edee799874"
+  parameters: 572567080
+  context_length: 4096
+  vocab_size: 131072
+  torch_dtype: "bfloat16"
+  attn_implementation: "sdpa"
+  device_policy: "cuda"
+  trust_remote_code: false
+  model_type: "apertus"
+  architecture: "ApertusForCausalLM"
+  chat_template_mode: "jinja"
+  add_special_tokens: false # QUIRK: Jinja template starts with <s>; tokenizer adds duplicate BOS unless False
+  license: "Apache-2.0"
+  vram_weight_gb: 1.15
+  generation_defaults:
+    do_sample: false
+    temperature: 0.0
+    max_new_tokens: 512
+    repetition_penalty: 1.0
+
+- id: "lfm2.5-350m"
+  name: "Liquid LFM2.5 350M"
+  hf_id: "LiquidAI/LFM2.5-350M"
+  revision: "9e6c6ccf47cd318696e137d381a7ded8fe4df09f"
+  parameters: 354483968
+  context_length: 32768
+  vocab_size: 65536
+  torch_dtype: "bfloat16"
+  attn_implementation: "sdpa"
+  device_policy: "cuda"
+  trust_remote_code: false
+  model_type: "lfm2"
+  architecture: "Lfm2ForCausalLM"
+  chat_template_mode: "jinja"
+  license: "LFM-Open-1.0"
+  vram_weight_gb: 0.71
+  generation_defaults:
+    do_sample: false
+    temperature: 0.0
+    max_new_tokens: 512
+    repetition_penalty: 1.0

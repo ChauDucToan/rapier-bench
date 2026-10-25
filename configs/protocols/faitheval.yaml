@@ -1,0 +1,37 @@
+- id: "faitheval_unanswerable_v1"
+  name: "FaithEval Contextual Faithfulness Protocol (Unanswerable Contexts)"
+  version: "1.0.0"
+  dataset_id: "faitheval"
+  domain: "contextual_faithfulness"
+  task_type: "contextual_faithfulness"
+  prompt_template: |
+    Context:
+    {context}
+
+    Question:
+    {question}
+
+    Answer the question based only on the context above. If the context does not contain enough information to answer, state strictly "UNANSWERABLE".
+  expected_answer_format: "unanswerable_flag"
+  evaluation_target: "unanswerable_abstention"
+
+- id: "faitheval_answerable_control_v1"
+  name: "FaithEval Answerable Control Protocol (Project Protocol Addition)"
+  version: "1.0.0"
+  dataset_id: "faitheval"
+  domain: "contextual_faithfulness"
+  task_type: "contextual_faithfulness"
+  protocol_type: "project_protocol_addition"
+  note: "Project protocol addition (not an official FaithEval metric) using rajpurkar/squad to guard against trivial over-abstention"
+  control_dataset: "rajpurkar/squad"
+  control_split: "validation"
+  prompt_template: |
+    Context:
+    {context}
+
+    Question:
+    {question}
+
+    Answer the question based only on the context above. Provide a concise factual answer.
+  expected_answer_format: "extractive_phrase"
+  evaluation_target: "answerable_control_accuracy"

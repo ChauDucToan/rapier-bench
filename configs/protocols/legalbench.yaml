@@ -1,0 +1,16 @@
+- id: "legalbench_contract_nli_binary"
+  name: "LegalBench Contract NLI Binary Protocol"
+  version: "1.0.0"
+  dataset_id: "legalbench_contract_nli"
+  domain: "legal"
+  task_type: "binary_classification"
+  prompt_template: |
+    Contract Clause:
+    {text}
+
+    Hypothesis:
+    {hypothesis}
+
+    Does the clause entail the hypothesis? Answer strictly with "Yes" or "No".
+  expected_answer_format: "binary_yes_no"
+  options: ["Yes", "No"]

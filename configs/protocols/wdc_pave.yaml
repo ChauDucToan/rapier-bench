@@ -1,0 +1,22 @@
+- id: "wdc_pave_extraction"
+  name: "WDC-PAVE Attribute-Value Extraction Protocol"
+  version: "1.0.0"
+  dataset_id: "wdc_pave"
+  domain: "ecommerce"
+  task_type: "attribute_value_extraction"
+  extraction_boundary: "extraction_only"
+  notes: |
+    Evaluates extraction only (as substring appeared in input_title or input_description).
+    Does NOT evaluate schema normalization (e.g. converting units).
+    Predicted "n/a" values NEVER count as true positives (VC).
+  prompt_template: |
+    Product Category: {category}
+    Target Attributes: {target_attributes}
+
+    Product Text:
+    {text}
+
+    Extract exact attribute values present in the product text. Output JSON strictly adhering to schema:
+    {{"attribute_name": ["value1", "value2"]}}
+    If an attribute value is not found in the text, use empty list [] or omit. Do not normalize or hallucinate values.
+  expected_answer_format: "json_dict"

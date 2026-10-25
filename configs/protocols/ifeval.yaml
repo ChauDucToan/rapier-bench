@@ -1,0 +1,28 @@
+- id: "ifeval_default"
+  name: "IFEval Instruction Following Protocol"
+  version: "1.0.0"
+  dataset_id: "ifeval"
+  domain: "general"
+  task_type: "instruction_following"
+  prompt_template: |
+    {prompt}
+  expected_answer_format: "free_form_instruction"
+  vendoring:
+    source: "https://github.com/google-research/google-research/tree/master/instruction_following_eval"
+    license: "Apache-2.0"
+    target_directory: "benchmark/vendor/ifeval"
+    vendored_files:
+      - "instructions.py"
+      - "instructions_registry.py"
+      - "instructions_util.py"
+      - "evaluation_lib.py"
+    dependencies:
+      langdetect: "1.0.9"
+      immutabledict: "4.3.1"
+      nltk: "3.10.4"
+      absl-py: "2.5.1"
+    offline_nltk_data:
+      resource: "punkt_tab"
+      cache_path: "benchmark/vendor/ifeval/nltk_data"
+      setup_command: "python -c \"import nltk; nltk.download('punkt_tab', download_dir='benchmark/vendor/ifeval/nltk_data')\""
+      env_var: "NLTK_DATA=benchmark/vendor/ifeval/nltk_data"
