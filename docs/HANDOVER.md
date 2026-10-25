@@ -6,9 +6,9 @@ This document records the verified status, runtime constraints, known regression
 
 The implementation is verified functional across backend, benchmark core, and frontend components:
 
-- **Backend Test Suite**: **60 passed** tests (`.venv/bin/python -m pytest tests -q`).
-  - Unit tests: evaluators (11), parsers (3), prompt builder (3), sampling (6), IFEval offline vendor (3).
-  - Integration tests: auth API (7), benchmark API (10), recommendation engine (9), ownership & privacy (3), regression tests (5).
+- **Backend Test Suite**: **62 passed** tests (`.venv/bin/python -m pytest tests -q`, re-verified after the sampling unification and the comparison gate; ruff clean).
+  - Unit tests: evaluators (11), parsers (3), prompt builder (3), sampling (5), IFEval offline vendor (3).
+  - Integration tests: auth API (7), benchmark API (12, incl. the two comparison-gate regressions), recommendation engine (9), ownership & privacy (3), regression tests (5).
 - **Frontend Test Suite**: **23 passed** tests (`cd frontend && npm test -- --run`).
   - Formatter tests (12), API client tests (7), status & component tests (4).
 - **Real GPU Run Artifacts (`artifacts/`)**:
@@ -24,6 +24,7 @@ To maintain strict technical honesty, the following areas remain unverified:
 - **FaithEval answerable control not measured in the real run**: `smoke_faitheval/cli_37787baa0d65` reports `control_samples: 0`, so its `balanced_score: 0.0` is an unmeasured placeholder, NOT a control accuracy. The SQuAD control path exists (`load_answerable_control`) and must be exercised separately.
 - **WDC-PAVE micro-F1 = 0.0 for lfm2.5-350m is a genuine result**, not an evaluator fault: `json_validity_rate: 1.0`, `vn_count: 27`, `nn_count: 44` — the model emits valid JSON but extracts no attribute values.
 - **Independent security review incomplete**: the authorization matrix is covered by integration tests, but the deeper traversal/IDOR/symlink probes were never run (the worker died mid-turn).
+- **Legacy sampling hash in pre-existing GPU artifacts**: the 7 recorded GPU runs were selected under the historical formula `SHA256(suite_name:seed:sample_id)`. The code now uses the single canonical rule `SHA256(dataset_id:split:seed:stable_id)` (docs/ARCHITECTURE.md §11.1). The old sample sets therefore cannot be regenerated with the same seed, and the `/comparisons` gate will return 400 for any request mixing a pre-change run with a post-change run on the same dataset/protocol (it compares evaluated sample IDs). Re-run a benchmark if a like-for-like comparison across the change is needed.
 - **Full Dataset Runs**: Evaluations were executed with `smoke` (5–10 samples); full splits (e.g., 2,492 FaithEval samples, 790 LegalBench samples) have not been run.
 - **Docker GPU Passthrough**: Docker Compose runs API and frontend in containers, but GPU passthrough is unconfigured. Real inference must be run on host.
 

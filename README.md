@@ -173,7 +173,7 @@ The recommendation endpoint (`POST /api/v1/recommendations`) performs determinis
 ## Verification & Testing
 
 ```bash
-# Run backend test suite (60 unit and integration tests)
+# Run backend test suite (62 unit and integration tests)
 .venv/bin/python -m pytest tests -q
 
 # Run frontend test suite (23 unit and component tests)

@@ -73,6 +73,8 @@ The primary development environment operates on an NVIDIA GeForce RTX 3050 Lapto
 
 ## Docker Compose Deployment
 
+> **Verification status:** the Docker path below has NOT been executed on this workstation. Only the native path (`scripts/setup_env.sh` → `scripts/dev.sh` → `cd frontend && npm run dev`) has been run and verified. Treat `docker compose up --build` as untested scaffolding until someone runs it.
+
 The repository includes a containerized multi-service definition:
 
 ```bash
