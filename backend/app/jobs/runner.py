@@ -1,0 +1,215 @@
+import json
+import signal
+import sys
+from datetime import UTC, datetime
+
+from app.config import settings
+from app.db.models import Artifact, BenchmarkMetric, BenchmarkRun, RunStatusEnum
+from app.db.session import SessionLocal
+from app.services.gpu_manager import GpuManager
+
+
+def utcnow() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
+def _sigterm_handler(signum, frame) -> None:
+    sys.exit(0)
+
+
+signal.signal(signal.SIGTERM, _sigterm_handler)
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("Usage: python -m app.jobs.runner <run_id>", file=sys.stderr)
+        sys.exit(1)
+
+    run_id = sys.argv[1]
+    db = SessionLocal()
+
+    try:
+        run = db.get(BenchmarkRun, run_id)
+        if not run:
+            print(f"Error: Run {run_id} not found in database", file=sys.stderr)
+            sys.exit(1)
+
+        if run.cancel_requested:
+            run.status = RunStatusEnum.CANCELLED
+            run.completed_at = utcnow()
+            db.commit()
+            sys.exit(0)
+
+        # Acquire single GPU lock
+        def cancel_check() -> bool:
+            curr = db.get(BenchmarkRun, run_id, populate_existing=True)
+            return bool(curr and curr.cancel_requested)
+
+        acquired = GpuManager.acquire(
+            db,
+            run_id,
+            timeout_sec=120.0,
+            interval_sec=1.0,
+            cancel_check=cancel_check,
+        )
+
+        if not acquired:
+            db.refresh(run)
+            if run.cancel_requested:
+                run.status = RunStatusEnum.CANCELLED
+                run.completed_at = utcnow()
+                db.commit()
+                sys.exit(0)
+            else:
+                run.status = RunStatusEnum.FAILED
+                run.error_text = "Timed out waiting to acquire GPU lock"
+                run.completed_at = utcnow()
+                db.commit()
+                sys.exit(1)
+
+        # Mark RUNNING
+        run.status = RunStatusEnum.RUNNING
+        run.started_at = utcnow()
+        db.commit()
+
+        # Lazy import of benchmark.core.runner
+        try:
+            from benchmark.core.runner import run_benchmark
+        except Exception as e:
+            run.status = RunStatusEnum.FAILED
+            run.error_text = f"ImportError: Failed to import benchmark runner: {e}"
+            run.completed_at = utcnow()
+            db.commit()
+            GpuManager.release(db, run_id)
+            print(f"Failed to import benchmark.core.runner: {e}", file=sys.stderr)
+            sys.exit(1)
+
+        # Call benchmark execution
+        artifacts_path = settings.artifacts_path / run_id
+        artifacts_path.mkdir(parents=True, exist_ok=True)
+
+        def progress_cb(done: int, total: int) -> None:
+            r = db.get(BenchmarkRun, run_id)
+            if r:
+                r.progress_done = done
+                r.progress_total = total
+                db.commit()
+
+        try:
+            metrics = run_benchmark(
+                run_id=run.id,
+                model_id=run.model_id,
+                dataset_id=run.dataset_id,
+                split=run.split,
+                sample_count=run.sample_count,
+                seed=run.seed,
+                protocol_id=run.protocol_id,
+                artifacts_dir=str(settings.artifacts_path),
+                device="cuda",
+                progress_callback=progress_cb,
+                cancel_check=cancel_check,
+            )
+
+            # Persist metrics
+            if isinstance(metrics, dict):
+                for metric_name, metric_val in metrics.items():
+                    db.add(
+                        BenchmarkMetric(
+                            run_id=run.id,
+                            metric_name=metric_name,
+                            metric_value=float(metric_val),
+                        )
+                    )
+
+            # Record artifacts
+            if artifacts_path.is_dir():
+                for file_entry in artifacts_path.rglob("*"):
+                    if file_entry.is_file() and not file_entry.name.endswith(".tmp"):
+                        rel = str(file_entry.relative_to(settings.artifacts_path))
+                        db.add(
+                            Artifact(
+                                run_id=run.id,
+                                artifact_type=file_entry.stem,
+                                relative_path=rel,
+                                file_size_bytes=file_entry.stat().st_size,
+                                created_at=utcnow(),
+                            )
+                        )
+
+            db.refresh(run)
+            if run.cancel_requested:
+                run.status = RunStatusEnum.CANCELLED
+                run.completed_at = utcnow()
+                db.commit()
+                sys.exit(0)
+
+            hw_candidates = [
+                artifacts_path / "hardware.json",
+                artifacts_path / run_id / "hardware.json",
+            ]
+            for hw_file in hw_candidates:
+                if hw_file.is_file():
+                    try:
+                        with open(hw_file, encoding="utf-8") as f:
+                            run.hardware_metadata = json.load(f)
+                        break
+                    except Exception as e:
+                        print(f"Warning: could not read {hw_file}: {e}", file=sys.stderr)
+
+            rc_candidates = [
+                artifacts_path / "run_config.json",
+                artifacts_path / run_id / "run_config.json",
+            ]
+            for rc_file in rc_candidates:
+                if rc_file.is_file():
+                    try:
+                        with open(rc_file, encoding="utf-8") as f:
+                            cfg_data = json.load(f)
+                            sample_selection_data = {
+                                "selected_sample_ids": cfg_data.get("selected_sample_ids", []),
+                                "requested_samples": cfg_data.get("requested_samples"),
+                                "actual_samples": cfg_data.get("actual_samples"),
+                                "sample_shortfall": (
+                                    cfg_data.get("shortfall_report", {}).get("shortfall", 0)
+                                    if isinstance(cfg_data.get("shortfall_report"), dict)
+                                    else max(
+                                        0,
+                                        (cfg_data.get("requested_samples") or 0)
+                                        - (cfg_data.get("actual_samples") or 0),
+                                    )
+                                ),
+                                "shortfall_report": cfg_data.get("shortfall_report"),
+                            }
+                            for k, v in cfg_data.items():
+                                if k not in sample_selection_data:
+                                    sample_selection_data[k] = v
+                            run.sample_selection = sample_selection_data
+                        break
+                    except Exception as e:
+                        print(f"Warning: could not read {rc_file}: {e}", file=sys.stderr)
+            run.status = RunStatusEnum.COMPLETED
+            run.completed_at = utcnow()
+            db.commit()
+
+        except Exception as e:
+            db.refresh(run)
+            if run.cancel_requested:
+                run.status = RunStatusEnum.CANCELLED
+                run.completed_at = utcnow()
+                db.commit()
+                sys.exit(0)
+            else:
+                run.status = RunStatusEnum.FAILED
+                run.error_text = str(e)
+                run.completed_at = utcnow()
+                db.commit()
+                sys.exit(1)
+        finally:
+            GpuManager.release(db, run_id)
+
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    main()
