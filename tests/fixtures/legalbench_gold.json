@@ -1,0 +1,34 @@
+[
+  {
+    "id": "cnli:0",
+    "task": "contract_nli_limited_use",
+    "answer": "Yes",
+    "pred": "Yes",
+    "exp_norm": "yes",
+    "exp_correct": true
+  },
+  {
+    "id": "cnli:1",
+    "task": "contract_nli_limited_use",
+    "answer": "No",
+    "pred": "No.",
+    "exp_norm": "no",
+    "exp_correct": true
+  },
+  {
+    "id": "cnli:2",
+    "task": "contract_nli_limited_use",
+    "answer": "Yes",
+    "pred": "No",
+    "exp_norm": "no",
+    "exp_correct": false
+  },
+  {
+    "id": "cnli:3",
+    "task": "contract_nli_limited_use",
+    "answer": "No",
+    "pred": "The clause allows it.",
+    "exp_norm": "the clause allows it",
+    "exp_correct": false
+  }
+]

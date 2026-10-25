@@ -1,0 +1,30 @@
+[
+  {
+    "id": "sciq:test:0",
+    "correct": "oxidants",
+    "choices": {"A": "oxidants", "B": "antioxidants", "C": "Oxygen", "D": "residues"},
+    "pred": "A",
+    "exp_correct": true
+  },
+  {
+    "id": "sciq:test:1",
+    "correct": "clone",
+    "choices": {"A": "phenotype", "B": "male", "C": "clone", "D": "adult"},
+    "pred": "The answer is (C)",
+    "exp_correct": true
+  },
+  {
+    "id": "sciq:test:2",
+    "correct": "gravity",
+    "choices": {"A": "friction", "B": "gravity", "C": "magnetism", "D": "inertia"},
+    "pred": "friction",
+    "exp_correct": false
+  },
+  {
+    "id": "sciq:test:3",
+    "correct": "photosynthesis",
+    "choices": {"A": "respiration", "B": "digestion", "C": "photosynthesis", "D": "osmosis"},
+    "pred": "I am not sure.",
+    "exp_correct": false
+  }
+]

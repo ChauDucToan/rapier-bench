@@ -1,0 +1,27 @@
+[
+  {
+    "id": 1,
+    "target": {"Brand": ["Apple"], "Color": ["Black"]},
+    "pred": {"Brand": "Apple", "Color": "Black"}
+  },
+  {
+    "id": 2,
+    "target": {"Brand": ["Dell"], "Color": null},
+    "pred": {"Brand": "Dell", "Color": "Red"}
+  },
+  {
+    "id": 3,
+    "target": {"Brand": ["Sony"], "Weight": ["1kg"]},
+    "pred": {"Brand": "Sony", "Weight": null}
+  },
+  {
+    "id": 4,
+    "target": {"Brand": ["Samsung"]},
+    "pred": {"Brand": "LG"}
+  },
+  {
+    "id": 5,
+    "target": {"Color": null},
+    "pred": {"Color": null}
+  }
+]

@@ -1,0 +1,26 @@
+[
+  {
+    "key": 1,
+    "instructions": ["length_constraints:number_words", "punctuation:no_comma"],
+    "kwargs": [{"num_words": 10, "relation": "at least"}, {}],
+    "response": "This is a clean sentence written without any prohibited punctuation marks.",
+    "exp_strict": [true, true],
+    "exp_loose": [true, true]
+  },
+  {
+    "key": 2,
+    "instructions": ["punctuation:no_comma"],
+    "kwargs": [{}],
+    "response": "Here is an answer, containing an illicit comma.",
+    "exp_strict": [false],
+    "exp_loose": [false]
+  },
+  {
+    "key": 3,
+    "instructions": ["detectable_format:number_highlighted_sections", "punctuation:no_comma"],
+    "kwargs": [{"num_highlights": 1}, {}],
+    "response": "*Important Section*\nThis line is clean and carries no comma",
+    "exp_strict": [true, true],
+    "exp_loose": [true, true]
+  }
+]

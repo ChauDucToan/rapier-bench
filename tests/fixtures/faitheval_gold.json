@@ -1,0 +1,42 @@
+[
+  {
+    "qid": "f1",
+    "type": "unanswerable",
+    "answers": ["unknown", "no answer", "no information"],
+    "pred": "unknown",
+    "exp_strict": true,
+    "exp_loose": true
+  },
+  {
+    "qid": "f2",
+    "type": "unanswerable",
+    "answers": ["unknown", "no answer", "no information"],
+    "pred": "There is no information provided in the context.",
+    "exp_strict": false,
+    "exp_loose": true
+  },
+  {
+    "qid": "f3",
+    "type": "unanswerable",
+    "answers": ["unknown", "no answer", "no information"],
+    "pred": "The treaty was signed in 1804.",
+    "exp_strict": false,
+    "exp_loose": false
+  },
+  {
+    "qid": "f4",
+    "type": "control_answerable",
+    "answers": ["Paris"],
+    "pred": "Paris",
+    "exp_strict": true,
+    "exp_loose": true
+  },
+  {
+    "qid": "f5",
+    "type": "control_answerable",
+    "answers": ["1999"],
+    "pred": "unknown",
+    "exp_strict": false,
+    "exp_loose": false
+  }
+]
