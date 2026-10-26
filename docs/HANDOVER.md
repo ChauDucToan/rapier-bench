@@ -6,7 +6,7 @@ This document records the verified status, runtime constraints, known regression
 
 The implementation is verified functional across backend, benchmark core, and frontend components:
 
-- **Backend Test Suite**: **62 passed** tests (`backend/.venv/bin/python -m pytest tests -q`, re-verified after the sampling unification and the comparison gate; ruff clean).
+- **Backend Test Suite**: **69 passed** tests (`backend/.venv/bin/python -m pytest tests -q`, re-verified after the sampling unification, the comparison gate, and the adapters restoration; ruff clean).
   - Unit tests: evaluators (11), parsers (3), prompt builder (3), sampling (5), IFEval offline vendor (3).
   - Integration tests: auth API (7), benchmark API (12, incl. the two comparison-gate regressions), recommendation engine (9), ownership & privacy (3), regression tests (5).
 - **Frontend Test Suite**: **23 passed** tests (`cd frontend && npm test -- --run`).
@@ -77,3 +77,25 @@ The following issues were identified and resolved during implementation (see `te
 1. **Expand Model Smokes**: Execute smoke runs for `lumma-0.6b` and `apertus-0.5b` on the remaining 4 suites (WDC-PAVE, LegalBench, IFEval, FaithEval), and run the FaithEval answerable control.
 2. **Automate Cron Benchmarking**: Wire periodic pilot-scale (25-sample) benchmark jobs for newly registered models.
 3. **NVIDIA Container Toolkit**: Add GPU device reservations to `docker-compose.yml` for environments supporting containerized CUDA.
+
+---
+
+## Post-62 Session Addendum (2026-10-26, this session)
+
+### Restored: benchmark/adapters package
+`benchmark/adapters/**` (5 dataset adapters + HF causal model adapter) was never committed — root cause: unanchored `.gitignore` patterns `models/` and `datasets/` silently matched `benchmark/adapters/models/` and `benchmark/adapters/datasets/`. A fresh clone could import nothing from `benchmark.core.registry`. Fixed (patterns anchored to `/models/`, `/datasets/`), adapters reconstructed to the frozen contracts, 7 new adapter tests (69 total).
+
+### Additional fixes
+- IFEval evaluation deps (`nltk==3.10.4`, `langdetect==1.0.9`, `immutabledict==4.3.1`, `absl-py==2.5.1`) now declared in `pyproject.toml` + `scripts/setup_env.sh` (previously only present via a foreign machine's shared site-packages link).
+- Venv path unified to `backend/.venv` in setup/dev scripts, README, and docs command examples; shared-torch source parameterized via `RB_SHARED_TORCH_SRC`.
+- `benchmark/__init__.py` sets `SSL_CERT_FILE` on NixOS hosts (no hashed CA dir → empty OpenSSL trust store → all HF/GitHub dataset downloads failed with CERTIFICATE_VERIFY_FAILED).
+- CLI `--split` defaults to dataset `default_split` for both dry-run and real runs (IFEval only has `train`).
+- Frontend lockfile regenerated with optional platform deps; `npm ci` now works on fresh checkout.
+
+### Verification (this machine — no GPU)
+- `pytest tests/ -q`: **69 passed**, ruff clean (backend + benchmark + tests).
+- Frontend: `tsc --noEmit` clean, eslint clean, vitest **23 passed**, `npm ci` clean.
+- All 5 dataset dry-runs exit 0 (sciq, wdc_pave, legalbench_contract_nli, ifeval, faitheval) against real downloaded datasets.
+- Real CPU inference vertical slice: `benchmark.cli run --model lfm2.5-350m --dataset sciq --samples 5 --device cpu` → accuracy 0.8, 5 predictions + metrics + hardware artifacts persisted.
+- Backend lifecycle via live API: register → login → create job → QUEUED → RUNNING → FAILED with clear error ("CUDA requested but torch.cuda.is_available() is False") on GPU-less host.
+- GPU inference: **PENDING** — no CUDA device on this machine. Torch 2.14.1+cu130 imports; run on the RTX 3050 host to verify.
