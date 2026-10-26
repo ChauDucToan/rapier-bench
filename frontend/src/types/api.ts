@@ -45,9 +45,6 @@ export interface DatasetResponse {
   task_type: string;
   default_split: string;
   evaluator_key: string;
-  metrics?: string[];
-  documented_subtasks?: string[];
-  default_protocol_id?: string;
 }
 
 export interface CreateBenchmarkRequest {
@@ -76,7 +73,7 @@ export interface BenchmarkRunResponse {
   protocol_id: string;
   split: string;
   sample_size_mode: string;
-  sample_count: number;
+  sample_count: number | null;
   seed: number;
   status: RunStatus;
   is_private: boolean;
@@ -153,12 +150,13 @@ export interface LeaderboardItem {
   model_name: string;
   domain: string;
   task_type: string;
+  dataset_id?: string | null;
   primary_metric_name: string;
   primary_metric_value: number;
   avg_latency_ms?: number | null;
   vram_weight_gb?: number | null;
   run_id: string;
-  sample_count: number;
+  sample_count?: number | null;
   completed_at?: string | null;
 }
 

@@ -23,6 +23,8 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_BASE_URL=http://backend:8000
+      # H2: browser-facing URL must be host-reachable, not the Compose-internal
+      # service name (browsers cannot resolve 'backend').
+      - NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
     depends_on:
       - backend

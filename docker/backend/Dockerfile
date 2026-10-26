@@ -10,6 +10,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 COPY pyproject.toml /app/
 COPY configs/ /app/configs/
+COPY benchmark/ /app/benchmark/
 COPY backend/ /app/backend/
 
 RUN pip install --no-cache-dir .

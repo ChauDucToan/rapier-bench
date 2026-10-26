@@ -181,7 +181,7 @@ export default function LeaderboardPage() {
                 <th scope="col" className="px-4 py-3">Task</th>
                 <th scope="col" className="px-4 py-3">Primary Metric</th>
                 <th scope="col" className="px-4 py-3">Latency</th>
-                <th scope="col" className="px-4 py-3">VRAM</th>
+                <th scope="col" className="px-4 py-3">VRAM (est.)</th>
                 <th scope="col" className="px-4 py-3">Samples</th>
                 <th scope="col" className="px-4 py-3">Run ID</th>
                 <th scope="col" className="px-4 py-3">Completed</th>
@@ -222,7 +222,10 @@ export default function LeaderboardPage() {
                     {formatLatency(item.avg_latency_ms)}
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap text-xs text-zinc-300">
-                    {formatVram(item.vram_weight_gb)}
+                    {/* Model-weight estimate from catalog, not measured peak */}
+                    <span title="Estimated model-weight footprint (catalog), not measured peak inference VRAM">
+                      {formatVram(item.vram_weight_gb)}
+                    </span>
                   </td>
                   <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-zinc-400">
                     {item.sample_count}

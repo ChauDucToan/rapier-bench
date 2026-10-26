@@ -30,7 +30,7 @@ Rapier Bench is a domain-aware, reproducible benchmarking platform for local ope
 | `wdc_pave` | E-Commerce | Attribute-Value Extraction | [WDC-PAVE](https://github.com/wbsg-uni-mannheim/wdc-pave) | `micro_f1` |
 | `legalbench_contract_nli` | Legal | Binary Classification | [`nguha/legalbench`](https://huggingface.co/datasets/nguha/legalbench) | `balanced_accuracy` |
 | `ifeval` | General | Instruction Following | [`google/IFEval`](https://huggingface.co/datasets/google/IFEval) | `prompt_level_strict_acc` |
-| `faitheval` | Faithfulness | Contextual Faithfulness | [`Salesforce/FaithEval`](https://huggingface.co/datasets/Salesforce/FaithEval-unanswerable-v1.0) | `balanced_score` |
+| `faitheval` | Faithfulness | Contextual Faithfulness | [`Salesforce/FaithEval`](https://huggingface.co/datasets/Salesforce/FaithEval-unanswerable-v1.0) | `unanswerable_context_accuracy_strict`* |
 
 ## System Architecture
 
@@ -143,7 +143,7 @@ curl -s -X POST http://localhost:8000/api/v1/benchmarks \
 - **WDC-PAVE**: `micro_f1`, `micro_precision`, `micro_recall`, `json_validity_rate`, `missing_attr_rate`, `unsupported_attr_rate`, `parse_failure_rate`.
 - **LegalBench**: `balanced_accuracy` (mean recall of Yes and No classes), `accuracy`, `aggregate_macro_balanced_accuracy`.
 - **IFEval**: `prompt_level_strict_acc`, `prompt_level_loose_acc`, `inst_level_strict_acc`, `inst_level_loose_acc`.
-- **FaithEval**: `unanswerable_context_accuracy_strict`, `unanswerable_context_accuracy_loose`, `answerable_control_accuracy`, `balanced_score` (harmonic mean guarding against blind abstention).
+- **FaithEval**: `unanswerable_context_accuracy_strict`, `unanswerable_context_accuracy_loose`. `answerable_control_accuracy` and `balanced_score` are only reported when the answerable-control protocol addition is active; standard unanswerable-only runs omit these metrics rather than reporting an unmeasured 0.
 
 ### Critical Methodological Warnings
 

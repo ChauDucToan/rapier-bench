@@ -95,10 +95,7 @@ export default function NewBenchmarkPage() {
           const first = datasetsList[0];
           setSelectedDomain(first.domain);
           setSelectedDatasetId(first.id);
-          const proto =
-            first.default_protocol_id ||
-            PROTOCOLS_BY_DATASET[first.id]?.[0]?.id ||
-            "";
+          const proto = PROTOCOLS_BY_DATASET[first.id]?.[0]?.id || "";
           setSelectedProtocolId(proto);
         }
         if (modelsList.length > 0) {
@@ -133,24 +130,15 @@ export default function NewBenchmarkPage() {
     if (matching.length > 0) {
       const first = matching[0];
       setSelectedDatasetId(first.id);
-      const proto =
-        first.default_protocol_id ||
-        PROTOCOLS_BY_DATASET[first.id]?.[0]?.id ||
-        "";
+      const proto = PROTOCOLS_BY_DATASET[first.id]?.[0]?.id || "";
       setSelectedProtocolId(proto);
     }
   }
 
   function handleDatasetChange(datasetId: string) {
     setSelectedDatasetId(datasetId);
-    const ds = datasets.find((d) => d.id === datasetId);
-    if (ds) {
-      const proto =
-        ds.default_protocol_id ||
-        PROTOCOLS_BY_DATASET[datasetId]?.[0]?.id ||
-        "";
-      setSelectedProtocolId(proto);
-    }
+    const proto = PROTOCOLS_BY_DATASET[datasetId]?.[0]?.id || "";
+    setSelectedProtocolId(proto);
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -369,12 +357,16 @@ export default function NewBenchmarkPage() {
 
           {activeDataset && (
             <div className="rounded-md border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-400">
-              <span className="font-semibold text-zinc-300">Target Metrics:</span>{" "}
-              {activeDataset.metrics?.join(", ") || activeDataset.evaluator_key} |{" "}
+              <span className="font-semibold text-zinc-300">Evaluator:</span>{" "}
+              {activeDataset.evaluator_key} |{" "}
               <span className="font-semibold text-zinc-300">Default Split:</span>{" "}
               {activeDataset.default_split}
             </div>
           )}
+          <p className="text-[11px] text-zinc-500">
+            Model VRAM figures are estimated model-weight footprints from the catalog, not measured peak inference memory.
+            “Full” evaluates every eligible sample in the selected split.
+          </p>
         </div>
 
         {/* Model Selection */}

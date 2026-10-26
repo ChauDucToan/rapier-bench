@@ -129,20 +129,22 @@ export default function ComparePage() {
     ? DATASET_PRIMARY_METRICS[firstSelectedRun.dataset_id] || "accuracy"
     : "accuracy";
 
-  // Recharts data
+  // Recharts data — missing metrics stay null so the chart shows a gap
+  // instead of a fabricated 0 (G4).
   const chartData = (comparison?.runs || []).map((r) => {
-    let val = 0;
+    let val: number | null = null;
     if (comparison?.metrics_comparison) {
       // metric -> run_id -> val or run_id -> metric -> val
       const fromMetricKey = comparison.metrics_comparison[primaryMetricKey]?.[r.id];
       const fromRunKey = comparison.metrics_comparison[r.id]?.[primaryMetricKey];
-      val = fromMetricKey ?? fromRunKey ?? 0;
+      val = fromMetricKey ?? fromRunKey ?? null;
     }
+    const display =
+      val !== null && val <= 1.0 && val >= 0.0 ? Math.round(val * 1000) / 10 : val;
     return {
       runId: r.id.slice(0, 8),
       model: r.model_id,
-      [formatMetricName(primaryMetricKey)]:
-        val <= 1.0 && val >= 0.0 ? Math.round(val * 1000) / 10 : val,
+      [formatMetricName(primaryMetricKey)]: display,
     };
   });
 
@@ -192,7 +194,7 @@ export default function ComparePage() {
         <div className="space-y-6">
           {/* Run Selection Panel */}
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-5 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-white">
                 Select 2–4 Comparable Runs ({selectedIds.length} selected)
               </h2>

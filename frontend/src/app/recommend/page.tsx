@@ -405,12 +405,12 @@ export default function RecommendPage() {
                         </div>
 
                         <div className="rounded border border-zinc-800 bg-zinc-950/60 p-3">
-                          <dt className="text-zinc-500">VRAM Footprint</dt>
+                          <dt className="text-zinc-500">VRAM Footprint (est.)</dt>
                           <dd className="mt-1 font-mono text-sm font-bold text-white">
                             {formatVram(cand.vram_gb)}
                           </dd>
                           <span className="text-[10px] text-zinc-600 font-mono">
-                            Norm: {cand.normalized_vram.toFixed(2)}
+                            Model-weight estimate; not measured peak
                           </span>
                         </div>
                       </dl>
