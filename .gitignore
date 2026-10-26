@@ -20,9 +20,9 @@ dist/
 *.db-journal
 *.db-wal
 
-# Models and datasets cache
-models/
-datasets/
+# Models and datasets cache (repo-root only; never ignore benchmark/adapters/*)
+/models/
+/datasets/
 .cache/
 artifacts/
 

@@ -20,7 +20,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser = subparsers.add_parser("run", help="Run benchmark suite")
     run_parser.add_argument("--model", required=True, help="Model ID or HF repo ID")
     run_parser.add_argument("--dataset", required=True, help="Dataset ID")
-    run_parser.add_argument("--split", default="test", help="Dataset split (default: test)")
+    run_parser.add_argument("--split", default=None, help="Dataset split (default: dataset default_split)")
     run_parser.add_argument("--protocol", default=None, help="Benchmark protocol ID")
     run_parser.add_argument("--samples", default="smoke", help="Sample count or mode (smoke, pilot, standard, full, or int)")
     run_parser.add_argument("--seed", type=int, default=42, help="Deterministic random seed (default: 42)")
@@ -37,6 +37,7 @@ def handle_dry_run(args: argparse.Namespace) -> int:
     model_cfg = registry.get_model_config(args.model)
     dataset_cfg = registry.get_dataset_config(args.dataset)
     canon_dataset_id = dataset_cfg.get("id", args.dataset)
+    args.split = args.split or dataset_cfg.get("default_split", "test")
 
     protocol_id = args.protocol or dataset_cfg.get("default_protocol_id")
     protocol_cfg = registry.get_protocol_config(protocol_id)
@@ -73,6 +74,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         if args.dry_run:
             return handle_dry_run(args)
+
+        # Resolve dataset default split for non-dry runs (same rule as dry-run handler)
+        dataset_cfg = ConfigRegistry().get_dataset_config(args.dataset)
+        args.split = args.split or dataset_cfg.get("default_split", "test")
 
         run_id = f"cli_{uuid.uuid4().hex[:12]}"
         print(f"Starting benchmark run {run_id} on device={args.device}...")

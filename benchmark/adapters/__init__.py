@@ -1,1 +1,1 @@
-"""Adapters for models and datasets."""
+"""Benchmark adapters; concrete imports are resolved by the registry."""
