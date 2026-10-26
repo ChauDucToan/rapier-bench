@@ -1,11 +1,15 @@
 import json
+import os
 import signal
 import sys
 from datetime import UTC, datetime
 
+from sqlalchemy import update
+
 from app.config import settings
 from app.db.models import Artifact, BenchmarkMetric, BenchmarkRun, RunStatusEnum
 from app.db.session import SessionLocal
+from app.jobs.process_manager import process_start_token
 from app.services.gpu_manager import GpuManager
 
 
@@ -39,6 +43,14 @@ def main() -> None:
             run.completed_at = utcnow()
             db.commit()
             sys.exit(0)
+
+        # A3: worker self-registration. The API records the PID right after
+        # spawn, but an API restart in that gap would see worker_pid=None.
+        # The worker re-asserts its identity here so reconciliation always has
+        # a fresh, accurate liveness token.
+        run.worker_pid = os.getpid()
+        run.worker_start_ts = process_start_token(os.getpid())
+        db.commit()
 
         # Acquire single GPU lock
         def cancel_check() -> bool:
@@ -187,9 +199,26 @@ def main() -> None:
                         break
                     except Exception as e:
                         print(f"Warning: could not read {rc_file}: {e}", file=sys.stderr)
-            run.status = RunStatusEnum.COMPLETED
-            run.completed_at = utcnow()
+            # A2: atomic terminal transition. Check-then-set would let a cancel
+            # that lands between the read and the write be overwritten by
+            # COMPLETED. Conditional UPDATE keeps cancelled runs CANCELLED.
+            completed = db.execute(
+                update(BenchmarkRun)
+                .where(
+                    BenchmarkRun.id == run_id,
+                    BenchmarkRun.cancel_requested.is_(False),
+                )
+                .values(status=RunStatusEnum.COMPLETED, completed_at=utcnow())
+            )
             db.commit()
+            if completed.rowcount == 0:
+                db.execute(
+                    update(BenchmarkRun)
+                    .where(BenchmarkRun.id == run_id)
+                    .values(status=RunStatusEnum.CANCELLED, completed_at=utcnow())
+                )
+                db.commit()
+                sys.exit(0)
 
         except Exception as e:
             db.refresh(run)

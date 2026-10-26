@@ -16,6 +16,18 @@ from app.services.benchmark_service import BenchmarkService
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 1. Create tables & enable SQLite foreign keys
     Base.metadata.create_all(bind=engine)
+    # ponytail: inline ALTER-TABLE migrations; upgrade to Alembic when schema
+    # churn grows beyond a handful of columns.
+    with engine.begin() as conn:
+        _cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(benchmark_runs)")}
+        if "worker_pid" not in _cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE benchmark_runs ADD COLUMN worker_pid INTEGER"
+            )
+        if "worker_start_ts" not in _cols:
+            conn.exec_driver_sql(
+                "ALTER TABLE benchmark_runs ADD COLUMN worker_start_ts VARCHAR(64)"
+            )
     with SessionLocal() as db:
         if settings.DATABASE_URL.startswith("sqlite"):
             db.execute(text("PRAGMA foreign_keys=ON;"))

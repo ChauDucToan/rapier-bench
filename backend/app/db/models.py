@@ -108,7 +108,7 @@ class BenchmarkRun(Base):
     protocol_id: Mapped[str] = mapped_column(ForeignKey("benchmark_protocols.id"), nullable=False)
     split: Mapped[str] = mapped_column(String(32), default="test")
     sample_size_mode: Mapped[str] = mapped_column(String(32), default="smoke")
-    sample_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    sample_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     seed: Mapped[int] = mapped_column(Integer, default=42)
     status: Mapped[RunStatusEnum] = mapped_column(
         Enum(RunStatusEnum), default=RunStatusEnum.QUEUED, index=True
@@ -121,6 +121,12 @@ class BenchmarkRun(Base):
     sample_selection: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     generation_config: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     hardware_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # A3: PID + Linux process start time (fallback: PID alone) so startup
+    # reconciliation can verify worker liveness without PID-recycling
+    # false positives (an unrelated process reusing the PID has a different
+    # start time and is not treated as our worker).
+    worker_pid: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    worker_start_ts: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

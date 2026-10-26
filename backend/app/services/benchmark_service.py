@@ -16,7 +16,7 @@ from app.db.models import (
     RunStatusEnum,
     User,
 )
-from app.jobs.process_manager import ProcessManager
+from app.jobs.process_manager import ProcessManager, process_start_token, same_process
 
 
 def utcnow() -> datetime:
@@ -35,7 +35,6 @@ SAMPLE_MODE_COUNTS = {
     "smoke": 10,
     "pilot": 25,
     "standard": 100,
-    "full": 1000,
 }
 
 
@@ -127,23 +126,41 @@ class BenchmarkService:
     @staticmethod
     def reconcile_stale_runs(db: Session) -> None:
         # ARCHITECTURE §6.4 Stale Run Reconciliation at Startup
+        # A3: a QUEUED/RUNNING run is only stale when its worker process is
+        # NOT alive. If the API restarted but the worker survived (separate
+        # process), failing the run and freeing the GPU lock would let a new
+        # worker start inference concurrently on the same GPU. Identity uses
+        # PID + /proc start token to avoid PID-recycling false positives.
+        def _worker_alive(run: BenchmarkRun) -> bool:
+            return same_process(run.worker_pid, run.worker_start_ts)
+
         stmt = (
             select(BenchmarkRun)
             .where(BenchmarkRun.status.in_([RunStatusEnum.QUEUED, RunStatusEnum.RUNNING]))
         )
         stale_runs = db.scalars(stmt).all()
         for run in stale_runs:
+            if _worker_alive(run):
+                # Worker survived the API restart: leave status and GPU lock
+                # alone; the worker owns the rest of the lifecycle.
+                continue
             run.status = RunStatusEnum.FAILED
-            run.error_text = "Orphaned run reconciled at startup"
+            run.error_text = "Orphaned run reconciled at startup (worker process not running)"
             run.completed_at = utcnow()
 
-        # Clear GPU lock
+        # Clear GPU lock only when it is not held by a surviving worker.
         lock = db.get(GpuLock, 1)
-        if not lock:
-            db.add(GpuLock(id=1, holder_run_id=None, acquired_at=None))
-        else:
-            lock.holder_run_id = None
-            lock.acquired_at = None
+        holder = lock.holder_run_id if lock else None
+        holder_alive = False
+        if holder:
+            holder_run = db.get(BenchmarkRun, holder)
+            holder_alive = _worker_alive(holder_run) if holder_run else False
+        if not holder_alive:
+            if not lock:
+                db.add(GpuLock(id=1, holder_run_id=None, acquired_at=None))
+            else:
+                lock.holder_run_id = None
+                lock.acquired_at = None
 
         db.commit()
 
@@ -230,7 +247,17 @@ class BenchmarkService:
             protocol_id = proto.id
 
         split = split or dataset.default_split
-        count = sample_count or SAMPLE_MODE_COUNTS.get(sample_size_mode, 10)
+        # A4: 'full' means the ENTIRE eligible split (count=None -> runner selects
+        # all eligible samples), not a hardcoded 1000. 'custom' uses the explicit
+        # sample_count as the exact requested count (G1).
+        if sample_size_mode == "full":
+            count = None
+        elif sample_size_mode == "custom":
+            count = sample_count
+            if count is None:
+                raise ValueError("sample_count is required when sample_size_mode is 'custom'")
+        else:
+            count = sample_count or SAMPLE_MODE_COUNTS.get(sample_size_mode, 10)
 
         import uuid
 
@@ -249,7 +276,7 @@ class BenchmarkService:
             is_private=is_private,
             cancel_requested=False,
             progress_done=0,
-            progress_total=count,
+            progress_total=count or 0,
             created_at=utcnow(),
         )
         db.add(run)
@@ -257,7 +284,13 @@ class BenchmarkService:
         db.refresh(run)
 
         # Spawn runner process
-        await ProcessManager.spawn_runner(run.id)
+        pid = await ProcessManager.spawn_runner(run.id)
+        # A3: persist PID + process start token so startup reconciliation can
+        # verify worker identity (PID alone can be recycled by the OS).
+        run.worker_pid = pid
+        run.worker_start_ts = process_start_token(pid)
+        db.commit()
+        db.refresh(run)
         return run
 
     @staticmethod
@@ -421,6 +454,13 @@ class BenchmarkService:
         except SafePathError:
             return [], 0
 
+        # C (Failure Analysis): filter contract shared with the UI.
+        # - correctness filters operate on the evaluated outcome (is_correct)
+        # - 'parse_failure' maps to the artifact parse_status value 'failed'
+        # - raw parse_status values ('success'/'fallback'/'failed') still pass through
+        # for direct API use.
+        parse_status_values = {"success", "fallback", "failed"}
+
         predictions: list[dict] = []
         with open(pred_file, encoding="utf-8") as f:
             for line in f:
@@ -428,11 +468,27 @@ class BenchmarkService:
                     continue
                 try:
                     record = json.loads(line)
-                    if status_filter and record.get("parse_status") != status_filter:
-                        continue
-                    predictions.append(record)
                 except json.JSONDecodeError:
                     continue
+                if status_filter == "correct":
+                    if record.get("is_correct") is not True:
+                        continue
+                elif status_filter == "incorrect":
+                    if record.get("is_correct") is not False:
+                        continue
+                elif status_filter == "parse_failure":
+                    if record.get("parse_status") != "failed":
+                        continue
+                elif status_filter in parse_status_values:
+                    if record.get("parse_status") != status_filter:
+                        continue
+                elif status_filter is not None:
+                    # Unknown filter value: 422-style rejection happens at the API layer.
+                    raise ValueError(
+                        f"Invalid status filter '{status_filter}'. Use 'correct', 'incorrect', "
+                        "'parse_failure', 'success', 'fallback', or 'failed'."
+                    )
+                predictions.append(record)
 
         total = len(predictions)
         sliced = predictions[offset : offset + limit]
