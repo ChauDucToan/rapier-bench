@@ -49,6 +49,17 @@ class LegalBenchEvaluator(BaseEvaluator):
     def __init__(self) -> None:
         super().__init__(key="legalbench_contract_nli_evaluator")
 
+    def pair_correctness(self, predictions, samples) -> dict[str, bool | None]:
+        pairs = self._pair_predictions(predictions, samples)
+        out: dict[str, bool | None] = {}
+        for pred, sample in pairs:
+            gold = sample.references.get("answer", sample.references.get("gold_answer", "")).strip()
+            parsed = pred.parsed_output
+            if parsed is None or parsed not in ("Yes", "No"):
+                parsed = parse_legal_output(pred.raw_output).parsed_output
+            out[pred.sample_id] = (parsed == gold) if parsed in ("Yes", "No") else False
+        return out
+
     def evaluate(
         self, predictions: list[PredictionRecord], samples: list[NormalizedSample]
     ) -> dict[str, float]:
@@ -117,6 +128,14 @@ class LegalBenchEvaluator(BaseEvaluator):
             sub_key = subtask_name.replace("contract_nli_", "")
             metrics[f"{sub_key}_balanced_acc"] = round(bal_acc, 4)
             metrics[f"{sub_key}_acc"] = round((tp + tn) / len(sub_pairs), 4)
+            # B4: disclose per-subtask denominators so an underrepresented
+            # subtask is visible instead of silently shrinking the macro mean.
+            metrics[f"{sub_key}_samples"] = float(len(sub_pairs))
+            if pos_total == 0 or neg_total == 0:
+                # B4: absent class -> balanced accuracy is not measurable for
+                # this subtask; record it as 0 but flag via the missing-class
+                # metric rather than presenting an undefined value as measured.
+                metrics[f"{sub_key}_missing_class"] = 1.0
 
         macro_bal_acc = (
             sum(subtask_balanced_accs) / len(subtask_balanced_accs) if subtask_balanced_accs else 0.0

@@ -63,6 +63,24 @@ def _parse_sample_prediction(
     )
 
 
+def _extract_target(dataset_id: str, sample: NormalizedSample) -> Any:
+    """C (Failure Analysis): compact gold reference for the prediction browser."""
+    d_id = dataset_id.lower()
+    if d_id == "sciq":
+        return sample.references.get("correct_letter")
+    if "legalbench" in d_id:
+        return sample.references.get("answer", sample.references.get("gold_answer"))
+    if "wdc" in d_id:
+        return sample.references.get("gold_json")
+    if "ifeval" in d_id:
+        return sample.references.get("instruction_id_list")
+    if "faitheval" in d_id:
+        return {
+            "type": sample.references.get("type", sample.metadata.get("type", "unanswerable")),
+            "answers": sample.references.get("answers", []),
+        }
+    return sample.references or None
+
 class DefaultBenchmarkRunner(BenchmarkRunner):
     """Executes single-model benchmark lifecycle with cancellation polling and atomic persistence."""
 
@@ -145,9 +163,17 @@ class DefaultBenchmarkRunner(BenchmarkRunner):
         )
 
         if not samples:
-            empty_metrics = {"sample_count": 0.0}
-            self.artifact_store.save_json(run_id, "metrics.json", empty_metrics)
-            return empty_metrics
+            # A5: zero eligible samples is a configuration/dataset failure, never a
+            # COMPLETED run with quality-looking metrics.
+            self.artifact_store.save_json(
+                run_id,
+                "metrics.json",
+                {"sample_count": 0.0, "error": "no eligible samples for selection"},
+            )
+            raise RuntimeError(
+                f"Run {run_id} selected 0 eligible samples (requested {count}); "
+                "refusing to produce a completed benchmark with no evaluated samples"
+            )
 
         # 4. Load Model and Tokenizer
         model_adapter = self.registry.get_model_adapter(model_id)
@@ -197,6 +223,15 @@ class DefaultBenchmarkRunner(BenchmarkRunner):
                 prompt_text, prompt_hash = prompt_builder.build_prompt(sample)
                 gen_out = model_adapter.generate(prompt_text)
 
+                # A1: model execution failure is infrastructure failure, not a
+                # wrong answer. Fail the run loudly so it can never enter the
+                # leaderboard as a "completed" evaluation.
+                if gen_out.error is not None:
+                    raise RuntimeError(
+                        f"Model inference failed on sample {sample.sample_id} "
+                        f"({idx + 1}/{total_samples}): {gen_out.error}"
+                    )
+
                 metrics_collector.record_inference(
                     gen_out.latency_ms,
                     gen_out.input_tokens,
@@ -235,6 +270,24 @@ class DefaultBenchmarkRunner(BenchmarkRunner):
         eval_metrics = evaluator.evaluate(predictions, samples)
         perf_metrics = metrics_collector.compute_summary()
         final_metrics = {**eval_metrics, **perf_metrics}
+
+        # C (Failure Analysis): persist gold targets and evaluator verdicts on
+        # each prediction so the API/browser can filter and display real outcomes.
+        correctness_map: dict[str, bool | None] = {}
+        pair_correctness = getattr(evaluator, "pair_correctness", None)
+        if callable(pair_correctness):
+            correctness_map = pair_correctness(predictions, samples) or {}
+        sample_by_id = {s.sample_id: s for s in samples}
+        predictions = [
+            PredictionRecord(
+                **{
+                    **{f: getattr(p, f) for f in p.__dataclass_fields__},
+                    "target": _extract_target(canon_dataset_id, sample_by_id[p.sample_id]),
+                    "is_correct": correctness_map.get(p.sample_id),
+                }
+            )
+            for p in predictions
+        ]
 
         self.artifact_store.save_predictions_jsonl(run_id, predictions)
         self.artifact_store.save_json(run_id, "metrics.json", final_metrics)

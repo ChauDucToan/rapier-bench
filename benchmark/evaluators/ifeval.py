@@ -43,6 +43,33 @@ class IFEvalEvaluator(BaseEvaluator):
     def __init__(self) -> None:
         super().__init__(key="ifeval_evaluator")
 
+    def pair_correctness(self, predictions, samples) -> dict[str, bool | None]:
+        """Prompt-level strict verdict: all instructions satisfied."""
+        pairs = self._pair_predictions(predictions, samples)
+        out: dict[str, bool | None] = {}
+        for pred, sample in pairs:
+            instruction_id_list = sample.references.get("instruction_id_list", [])
+            if not instruction_id_list:
+                out[pred.sample_id] = None
+                continue
+            response = pred.raw_output
+            all_pass = True
+            for idx, inst_id in enumerate(instruction_id_list):
+                kwargs_list = sample.references.get("kwargs", [])
+                kw = kwargs_list[idx] if idx < len(kwargs_list) else {}
+                clean_kw = {k: v for k, v in kw.items() if v is not None} if isinstance(kw, dict) else {}
+                inst_cls = instructions_registry.INSTRUCTION_DICT.get(inst_id)
+                if inst_cls is None:
+                    all_pass = False
+                    continue
+                instruction = inst_cls(inst_id)
+                with contextlib.suppress(Exception):
+                    instruction.build_description(**clean_kw)
+                if not bool(instruction.check_following(response)):
+                    all_pass = False
+            out[pred.sample_id] = all_pass
+        return out
+
     def evaluate(
         self, predictions: list[PredictionRecord], samples: list[NormalizedSample]
     ) -> dict[str, float]:

@@ -77,6 +77,12 @@ class PredictionRecord:
     output_tokens: int
     latency_ms: float
     error: str | None = None
+    # C (Failure Analysis): reference target and evaluator verdict, persisted so
+    # the prediction browser/API can display gold values and correctness without
+    # re-evaluating. is_correct is None when correctness is not meaningful for
+    # the task (e.g. IFEval multi-instruction, WDC-PAVE set-valued extraction).
+    target: Any = None
+    is_correct: bool | None = None
 
 
 class ModelAdapter(ABC):

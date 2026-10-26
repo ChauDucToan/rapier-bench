@@ -29,8 +29,11 @@ def parse_sciq_output(raw_output: str, options: dict[str, str]) -> ParseResult:
     if prefix_match:
         return ParseResult(raw_output=raw_output, parsed_output=prefix_match.group(1).upper(), parse_status=ParseStatus.SUCCESS)
 
-    # Rule 1b: Single option letter bounded
-    letter_match = re.search(r"(?:^|\b|\()([A-D])(?:\)|\.|\b|$)", text)
+    # Rule 1b: Standalone option letter [A-D] as its own token (e.g. "B", "(C)",
+    # "D.", "**A**"). B6: a letter embedded in prose ("vitamin B complex",
+    # "I think A but final answer is D") is NOT a standalone selection and must
+    # not be extracted as the model's answer.
+    letter_match = re.search(r"(?:^|[\s\(*])([A-D])(?=[\s\).,:;!?\]}*$]|$)", text)
     if letter_match:
         return ParseResult(raw_output=raw_output, parsed_output=letter_match.group(1).upper(), parse_status=ParseStatus.SUCCESS)
 
@@ -57,6 +60,18 @@ class SciQEvaluator(BaseEvaluator):
 
     def __init__(self) -> None:
         super().__init__(key="sciq_evaluator")
+
+    def pair_correctness(self, predictions, samples) -> dict[str, bool | None]:
+        pairs = self._pair_predictions(predictions, samples)
+        out: dict[str, bool | None] = {}
+        for pred, sample in pairs:
+            correct_letter = sample.references.get("correct_letter", "")
+            options = sample.input_payload.get("options", {})
+            parsed = pred.parsed_output
+            if parsed is None or parsed == "":
+                parsed = parse_sciq_output(pred.raw_output, options).parsed_output
+            out[pred.sample_id] = parsed == correct_letter if parsed != "INVALID" else False
+        return out
 
     def evaluate(
         self, predictions: list[PredictionRecord], samples: list[NormalizedSample]
