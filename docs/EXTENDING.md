@@ -40,7 +40,7 @@ Add an entry to `configs/models.yaml`:
 Validate loading, prompt formatting, and tokenization quirks without downloading weights:
 
 ```bash
-.venv/bin/python -m benchmark.cli run \
+backend/.venv/bin/python -m benchmark.cli run \
   --model my-model-0.5b \
   --dataset sciq \
   --protocol sciq_evidence_grounded \
@@ -179,4 +179,4 @@ Before submitting a new benchmark suite:
 2. **Gold Test Fixtures**: Add `tests/fixtures/<name>_gold.json` containing at least 4 known inputs and hand-calculated metric expectations.
 3. **Unit Tests**: Implement evaluator assertions in `tests/unit/test_evaluators.py` against the gold fixture.
 4. **Prompt Leak Protection**: Verify `DefaultPromptBuilder` rejects templates containing references to gold evaluation fields.
-5. **Dry Run**: Confirm `.venv/bin/python -m benchmark.cli run --dataset <id> --protocol <id> --dry-run` exits with code 0.
+5. **Dry Run**: Confirm `backend/.venv/bin/python -m benchmark.cli run --dataset <id> --protocol <id> --dry-run` exits with code 0.

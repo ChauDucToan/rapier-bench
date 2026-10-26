@@ -91,7 +91,7 @@ The CLI executes runs either against physical weights or in dry-run mode (prompt
 
 ```bash
 # Dry run verification (validates sampling, prompt construction, and hash computation)
-.venv/bin/python -m benchmark.cli run \
+backend/.venv/bin/python -m benchmark.cli run \
   --model apertus-0.5b \
   --dataset sciq \
   --protocol sciq_evidence_grounded \
@@ -99,7 +99,7 @@ The CLI executes runs either against physical weights or in dry-run mode (prompt
   --dry-run
 
 # Execute real local inference run
-.venv/bin/python -m benchmark.cli run \
+backend/.venv/bin/python -m benchmark.cli run \
   --model apertus-0.5b \
   --dataset sciq \
   --protocol sciq_evidence_grounded \
@@ -174,13 +174,13 @@ The recommendation endpoint (`POST /api/v1/recommendations`) performs determinis
 
 ```bash
 # Run backend test suite (62 unit and integration tests)
-.venv/bin/python -m pytest tests -q
+backend/.venv/bin/python -m pytest tests -q
 
 # Run frontend test suite (23 unit and component tests)
 cd frontend && npm test -- --run
 
 # Code quality and style audits
-.venv/bin/ruff check backend benchmark tests
+backend/.venv/bin/ruff check backend benchmark tests
 cd frontend && npm run lint
 ```
 

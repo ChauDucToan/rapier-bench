@@ -6,7 +6,7 @@ This document records the verified status, runtime constraints, known regression
 
 The implementation is verified functional across backend, benchmark core, and frontend components:
 
-- **Backend Test Suite**: **62 passed** tests (`.venv/bin/python -m pytest tests -q`, re-verified after the sampling unification and the comparison gate; ruff clean).
+- **Backend Test Suite**: **62 passed** tests (`backend/.venv/bin/python -m pytest tests -q`, re-verified after the sampling unification and the comparison gate; ruff clean).
   - Unit tests: evaluators (11), parsers (3), prompt builder (3), sampling (5), IFEval offline vendor (3).
   - Integration tests: auth API (7), benchmark API (12, incl. the two comparison-gate regressions), recommendation engine (9), ownership & privacy (3), regression tests (5).
 - **Frontend Test Suite**: **23 passed** tests (`cd frontend && npm test -- --run`).
@@ -48,11 +48,11 @@ bash scripts/dev.sh
 cd frontend && npm run dev
 
 # 4. Verify test suites
-.venv/bin/python -m pytest tests -q
+backend/.venv/bin/python -m pytest tests -q
 cd frontend && npm test -- --run
 
 # 5. Execute dry run CLI check
-.venv/bin/python -m benchmark.cli run \
+backend/.venv/bin/python -m benchmark.cli run \
   --model apertus-0.5b \
   --dataset sciq \
   --protocol sciq_evidence_grounded \
