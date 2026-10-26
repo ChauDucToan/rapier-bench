@@ -8,7 +8,8 @@ from benchmark.adapters.datasets.base import BaseDatasetAdapter
 from benchmark.core.types import NormalizedSample, TaskType
 
 
-def _normalize_wdc_row(row: dict[str, Any], dataset_id: str = "wdc_pave") -> NormalizedSample:
+def _normalize_wdc_row(row: dict[str, Any], config: dict[str, Any]) -> NormalizedSample:
+    dataset_id = config.get("id", "wdc_pave")
     target_scores = row["target_scores"]
     gold_json = {}
     for attribute, values in target_scores.items():
@@ -23,7 +24,7 @@ def _normalize_wdc_row(row: dict[str, Any], dataset_id: str = "wdc_pave") -> Nor
     return NormalizedSample(
         sample_id=f"wdc_pave:test:{row['id']}",
         dataset_id=dataset_id,
-        dataset_revision="main",
+        dataset_revision=str(config.get("revision", "main")),
         domain="ecommerce",
         task_type=TaskType.ATTRIBUTE_VALUE_EXTRACTION,
         input_payload={
@@ -54,5 +55,5 @@ class WdcPaveDatasetAdapter(BaseDatasetAdapter):
     ) -> list[NormalizedSample]:
         if split != "test":
             raise ValueError(f"Unsupported WDC-PAVE split: {split}")
-        samples = [_normalize_wdc_row(row, self.config.get("id", "wdc_pave")) for row in self._load_rows()]
+        samples = [_normalize_wdc_row(row, self.config) for row in self._load_rows()]
         return self._finalize(samples, split, limit, seed)

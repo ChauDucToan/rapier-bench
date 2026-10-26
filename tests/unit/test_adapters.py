@@ -35,7 +35,8 @@ def test_wdc_gold_normalization() -> None:
                     "Intel X5335": {"pid": ["2"], "score": 1},
                 },
             },
-        }
+        },
+        {"id": "wdc_pave", "revision": "main"},
     )
     assert sample.references["gold_json"] == {
         "Generation": "G5",
@@ -96,7 +97,7 @@ def test_protocol_templates_match_adapter_payload_keys() -> None:
 
     payload_samples = {
         "sciq": [_normalize_sciq_row(fake_rows["sciq"], "test", 0, {"id": "sciq"})],
-        "wdc_pave": [_normalize_wdc_row(fake_rows["wdc_pave"])],
+        "wdc_pave": [_normalize_wdc_row(fake_rows["wdc_pave"], {"id": "wdc_pave"})],
         "ifeval": [
             _norm_ifeval({"key": 1, "prompt": "p", "instruction_id_list": [], "kwargs": []}, {"id": "ifeval"})
         ],

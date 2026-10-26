@@ -50,7 +50,13 @@ class SciQDatasetAdapter(BaseDatasetAdapter):
     def load_samples(
         self, split: str, limit: int | None = None, seed: int = 42
     ) -> list[NormalizedSample]:
-        rows = load_dataset("allenai/sciq", "default", split=split, streaming=False)
+        rows = load_dataset(
+            "allenai/sciq",
+            "default",
+            split=split,
+            streaming=False,
+            revision=self.config.get("revision"),
+        )
         samples = []
         evidence_required = self.protocol_id is None or "evidence" in self.protocol_id
         for i, row in enumerate(rows):

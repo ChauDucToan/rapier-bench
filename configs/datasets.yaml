@@ -26,7 +26,8 @@
 - id: "wdc_pave"
   name: "WDC-PAVE Product Attribute-Value Extraction"
   source: "github_raw_jsonl"
-  raw_url: "https://raw.githubusercontent.com/wbsg-uni-mannheim/wdc-pave/main/data/processed_datasets/wdc_with_all_attributes/test.jsonl"
+  raw_url: "https://raw.githubusercontent.com/wbsg-uni-mannheim/wdc-pave/5546254c0dc7649c4eb0ef11671ecefb9070ecd0/data/processed_datasets/wdc_with_all_attributes/test.jsonl"
+  revision: "5546254c0dc7649c4eb0ef11671ecefb9070ecd0" # A6: pinned upstream commit (mutable 'main' branch rejected)
   upstream_repo: "https://github.com/wbsg-uni-mannheim/wdc-pave"
   domain: "ecommerce"
   task_type: "attribute_value_extraction"

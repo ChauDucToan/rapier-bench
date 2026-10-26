@@ -30,6 +30,11 @@ class IFEvalDatasetAdapter(BaseDatasetAdapter):
     def load_samples(self, split: str, limit: int | None = None, seed: int = 42):
         if split != "train":
             raise ValueError(f"Unsupported IFEval split: {split}")
-        rows = load_dataset("google/IFEval", "default", split="train")
+        rows = load_dataset(
+            "google/IFEval",
+            "default",
+            split="train",
+            revision=self.config.get("revision"),
+        )
         samples = [_normalize_row(row, self.config) for row in rows]
         return self._finalize(samples, split, limit, seed)

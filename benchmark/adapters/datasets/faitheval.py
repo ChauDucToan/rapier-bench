@@ -31,6 +31,11 @@ class FaithEvalDatasetAdapter(BaseDatasetAdapter):
     def load_samples(self, split: str, limit: int | None = None, seed: int = 42):
         if split != "test":
             raise ValueError(f"Unsupported FaithEval split: {split}")
-        rows = load_dataset("Salesforce/FaithEval-unanswerable-v1.0", "default", split="test")
+        rows = load_dataset(
+            "Salesforce/FaithEval-unanswerable-v1.0",
+            "default",
+            split="test",
+            revision=self.config.get("revision"),
+        )
         samples = [_normalize_row(row, self.config) for row in rows]
         return self._finalize(samples, split, limit, seed)

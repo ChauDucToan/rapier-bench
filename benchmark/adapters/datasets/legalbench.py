@@ -5,6 +5,7 @@ from typing import Any
 from datasets import load_dataset
 
 from benchmark.adapters.datasets.base import BaseDatasetAdapter
+from benchmark.core.sampling import select_samples
 from benchmark.core.types import NormalizedSample, TaskType
 
 HYPOTHESES = {
@@ -39,9 +40,67 @@ class LegalBenchDatasetAdapter(BaseDatasetAdapter):
         return ["train", "test"]
 
     def load_samples(self, split: str, limit: int | None = None, seed: int = 42):
-        samples: list[NormalizedSample] = []
+        # B4: stratified sampling. Pooled sampling let hash-order pick any N
+        # rows across the five subtasks, so small subtasks could vanish from a
+        # sampled run and the macro balanced-accuracy silently averaged over
+        # fewer subtasks. Selection is now proportional-within-subtask via the
+        # same deterministic SHA-256 rule (per-subtask quota = round(N * share),
+        # at least 1 when the subtask has data).
+        per_subtask: dict[str, list[NormalizedSample]] = {}
         for subtask in self.config["documented_subtasks"]:
-            rows = load_dataset("nguha/legalbench", subtask, split=split)
-            for row_index, row in enumerate(rows):
-                samples.append(_normalize_row(subtask, row_index, row, self.config))
-        return self._finalize(samples, split, limit, seed)
+            rows = load_dataset(
+                "nguha/legalbench",
+                subtask,
+                split=split,
+                revision=self.config.get("revision"),
+            )
+            per_subtask[subtask] = [
+                _normalize_row(subtask, row_index, row, self.config)
+                for row_index, row in enumerate(rows)
+            ]
+
+        all_samples = [s for rows in per_subtask.values() for s in rows]
+        total = len(all_samples)
+
+        if limit is not None and limit < total:
+            # Deterministic largest-remainder allocation: base quota per subtask,
+            # then distribute the leftover count to the largest fractional
+            # remainders (stable tie-break by subtask name). Guarantees the
+            # selected total equals `limit` exactly without dropping a subtask
+            # that has data (each gets at least 1).
+            subtasks = sorted(per_subtask.keys())
+            raw = {s: limit * len(per_subtask[s]) / total for s in subtasks}
+            base = {s: min(int(raw[s]), len(per_subtask[s])) for s in subtasks}
+            # A subtask may round above its own row count; clamp back.
+            for s in subtasks:
+                base[s] = min(base[s], len(per_subtask[s]))
+            leftover = limit - sum(base.values())
+            by_remainder = sorted(
+                subtasks,
+                key=lambda s: (-(raw[s] - int(raw[s])), -len(per_subtask[s]), s),
+            )
+            i = 0
+            safeguard = 0
+            while leftover > 0 and safeguard <= len(subtasks) * 2:
+                s = by_remainder[i % len(subtasks)]
+                if base[s] < len(per_subtask[s]):
+                    base[s] += 1
+                    leftover -= 1
+                i += 1
+                safeguard += 1
+
+            selected: list[NormalizedSample] = []
+            for subtask in subtasks:
+                quota = base[subtask]
+                if quota <= 0:
+                    continue
+                sub_selected, _ = select_samples(
+                    per_subtask[subtask], subtask, split, seed, quota
+                )
+                selected.extend(sub_selected)
+            # Deterministic global order.
+            selected, _ = select_samples(selected, self.config["id"], split, seed, limit)
+            return selected
+
+        selected, _ = select_samples(all_samples, self.config["id"], split, seed, limit)
+        return selected
