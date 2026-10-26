@@ -159,6 +159,7 @@ def test_comparisons_and_leaderboard(client: TestClient, db_session: Session):
         sample_count=10,
         status=RunStatusEnum.COMPLETED,
         is_private=False,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
     )
     r2 = BenchmarkRun(
         id="run-comp-2",
@@ -169,6 +170,7 @@ def test_comparisons_and_leaderboard(client: TestClient, db_session: Session):
         sample_count=10,
         status=RunStatusEnum.COMPLETED,
         is_private=False,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
     )
     db_session.add_all([r1, r2])
     db_session.commit()
@@ -269,6 +271,7 @@ def test_comparisons_reject_mixed_protocols(client: TestClient, db_session: Sess
             sample_count=5,
             status=RunStatusEnum.COMPLETED,
             is_private=False,
+            sample_selection={"selected_sample_ids": ["sciq:test:1"]},
         ),
         BenchmarkRun(
             id="run-mix-b",
@@ -279,6 +282,7 @@ def test_comparisons_reject_mixed_protocols(client: TestClient, db_session: Sess
             sample_count=5,
             status=RunStatusEnum.COMPLETED,
             is_private=False,
+            sample_selection={"selected_sample_ids": ["sciq:test:1"]},
         ),
     ])
     db_session.commit()
@@ -316,6 +320,7 @@ def test_leaderboard_latency_ms_mean_metric(client: TestClient, db_session: Sess
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=10,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )

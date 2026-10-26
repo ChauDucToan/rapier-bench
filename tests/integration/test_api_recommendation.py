@@ -26,6 +26,7 @@ def setup_recommendation_models(db: Session) -> None:
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=100,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -36,6 +37,7 @@ def setup_recommendation_models(db: Session) -> None:
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=100,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -46,6 +48,7 @@ def setup_recommendation_models(db: Session) -> None:
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=100,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -98,7 +101,8 @@ def test_weights_change_ranking(client: TestClient, db_session: Session):
 def test_hardware_and_quality_filtering(client: TestClient, db_session: Session):
     setup_recommendation_models(db_session)
 
-    # VRAM cap: max 1.0 GB excludes lumma (1.30) and apertus (1.15), leaving 1 model (<3 -> insufficient_sample)
+    # VRAM cap: max 1.0 GB excludes lumma (1.30) and apertus (1.15), leaving 1 model.
+    # E6: small comparison sets are still ranked (informational), not refused.
     res_vram = client.post(
         "/api/v1/recommendations",
         json={
@@ -108,8 +112,11 @@ def test_hardware_and_quality_filtering(client: TestClient, db_session: Session)
         headers={"X-Rapier-Action": "1"},
     )
     assert res_vram.status_code == 200
-    assert res_vram.json()["status"] == "insufficient_sample"
-    assert res_vram.json()["eligible_count"] == 1
+    data = res_vram.json()
+    assert data["status"] == "success"
+    assert data["eligible_count"] == 1
+    assert len(data["recommendations"]) == 1
+    assert any("small comparison set" in lim for lim in data["limitations"])
 
 
 def test_zero_eligible_models_response(client: TestClient, db_session: Session):
@@ -133,7 +140,7 @@ def test_zero_eligible_models_response(client: TestClient, db_session: Session):
 
 
 def test_insufficient_sample_under_three_models(client: TestClient, db_session: Session):
-    # Only 2 models in DB
+    # Only 2 models in DB. E6: small sets are ranked with an explicit limitation note.
     user = User(username="u_two", email="two@test.com", password_hash=hash_password("pw"))
     db_session.add(user)
     db_session.commit()
@@ -145,6 +152,7 @@ def test_insufficient_sample_under_three_models(client: TestClient, db_session: 
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=10,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -155,6 +163,7 @@ def test_insufficient_sample_under_three_models(client: TestClient, db_session: 
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=10,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -176,9 +185,10 @@ def test_insufficient_sample_under_three_models(client: TestClient, db_session: 
     )
     assert res.status_code == 200
     data = res.json()
-    assert data["status"] == "insufficient_sample"
+    assert data["status"] == "success"
     assert data["eligible_count"] == 2
-    assert "Fewer than 3 comparable models" in data["limitations"][0]
+    assert len(data["recommendations"]) == 2
+    assert any("small comparison set" in lim for lim in data["limitations"])
 
 
 def test_missing_metrics_excluded_never_invented(client: TestClient, db_session: Session):
@@ -193,6 +203,7 @@ def test_missing_metrics_excluded_never_invented(client: TestClient, db_session:
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=10,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -223,6 +234,7 @@ def test_incomparable_protocols_not_mixed(client: TestClient, db_session: Sessio
         dataset_id="sciq",
         protocol_id="sciq_closed_book",
         sample_count=10,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -292,6 +304,7 @@ def test_deterministic_tie_breaking(client: TestClient, db_session: Session):
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=10,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -302,6 +315,7 @@ def test_deterministic_tie_breaking(client: TestClient, db_session: Session):
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=10,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -312,6 +326,7 @@ def test_deterministic_tie_breaking(client: TestClient, db_session: Session):
         dataset_id="sciq",
         protocol_id="sciq_evidence_grounded",
         sample_count=10,
+        sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
         status=RunStatusEnum.COMPLETED,
         is_private=False,
     )
@@ -354,7 +369,8 @@ def test_recommendation_recognizes_latency_ms_mean(client: TestClient, db_sessio
                 dataset_id="sciq",
                 protocol_id="sciq_evidence_grounded",
                 sample_count=10,
-                status=RunStatusEnum.COMPLETED,
+                sample_selection={"selected_sample_ids": [f"sciq:test:{i}" for i in range(10)]},
+        status=RunStatusEnum.COMPLETED,
                 is_private=False,
             )
         )

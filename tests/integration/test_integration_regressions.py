@@ -1,4 +1,5 @@
 import contextlib
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -210,8 +211,40 @@ def test_startup_reconciliation_clears_lock_and_marks_failed(db_session: Session
     db_session.refresh(lock)
 
     assert run1.status == RunStatusEnum.FAILED
-    assert run1.error_text == "Orphaned run reconciled at startup"
+    assert "Orphaned run reconciled at startup" in run1.error_text
     assert run2.status == RunStatusEnum.FAILED
-    assert run2.error_text == "Orphaned run reconciled at startup"
+    assert "Orphaned run reconciled at startup" in run2.error_text
     assert lock.holder_run_id is None
     assert lock.acquired_at is None
+
+def test_startup_reconciliation_keeps_live_worker_running(db_session: Session):
+    """A3: a run whose worker process is still alive must NOT be failed at
+    API startup, and its GPU lock must not be released."""
+    user = User(username="u_live", email="live@test.com", password_hash=hash_password("pw"))
+    db_session.add(user)
+    db_session.commit()
+    run = BenchmarkRun(
+        id="orphan-live-1",
+        user_id=user.id,
+        model_id="lumma-0.6b",
+        dataset_id="sciq",
+        protocol_id="sciq_evidence_grounded",
+        split="test",
+        sample_count=5,
+        status=RunStatusEnum.RUNNING,
+        is_private=False,
+        worker_pid=os.getpid(),  # this test process is trivially alive
+    )
+    db_session.add(run)
+    lock = db_session.get(GpuLock, 1) or GpuLock(id=1)
+    lock.holder_run_id = "orphan-live-1"
+    db_session.add(lock)
+    db_session.commit()
+
+    BenchmarkService.reconcile_stale_runs(db_session)
+
+    db_session.refresh(run)
+    db_session.refresh(lock)
+    assert run.status == RunStatusEnum.RUNNING
+    assert run.error_text is None
+    assert lock.holder_run_id == "orphan-live-1"

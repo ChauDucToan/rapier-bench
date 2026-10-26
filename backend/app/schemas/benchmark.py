@@ -13,7 +13,9 @@ class CreateBenchmarkRequest(BaseModel):
     dataset_id: str = Field(..., max_length=128, pattern=r"^[a-zA-Z0-9_\-\./]+$")
     protocol_id: str | None = Field(None, max_length=128, pattern=r"^[a-zA-Z0-9_\-]+$")
     split: str | None = Field(None, max_length=64, pattern=r"^[a-zA-Z0-9_\-]+$")
-    sample_size_mode: str = Field("smoke", pattern=r"^(smoke|pilot|standard|full)$")
+    # G1: 'custom' is an accepted frontend mode meaning "use the explicit
+    # sample_count as the exact requested count".
+    sample_size_mode: str = Field("smoke", pattern=r"^(smoke|pilot|standard|full|custom)$")
     sample_count: int | None = Field(
         None, ge=1, le=10000, validation_alias=AliasChoices("sample_count", "samples")
     )
@@ -29,7 +31,7 @@ class BenchmarkRunResponse(BaseModel):
     protocol_id: str
     split: str
     sample_size_mode: str
-    sample_count: int
+    sample_count: int | None = None
     seed: int
     status: RunStatusEnum
     is_private: bool
@@ -37,6 +39,8 @@ class BenchmarkRunResponse(BaseModel):
     progress_done: int
     progress_total: int
     error_text: str | None = None
+    sample_selection: dict[str, Any] | None = None
+    hardware_metadata: dict[str, Any] | None = None
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None

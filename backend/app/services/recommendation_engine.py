@@ -89,23 +89,40 @@ class RecommendationEngine:
                 explanation="Zero models eligible: no historical benchmark runs exist for this domain.",
             )
 
-        # Incomparable protocols check: identify dominant protocol or partition
-        protocol_counts: dict[str, int] = {}
-        for run, _dataset, _model in results:
-            protocol_counts[run.protocol_id] = protocol_counts.get(run.protocol_id, 0) + 1
+        # E2: dominant protocol is selected PER DATASET (a domain may contain
+        # several datasets, and protocol ids are dataset-scoped). Deterministic
+        # tie-break by protocol id. One model/user cannot swing the selection
+        # across unrelated datasets.
+        protocol_counts: dict[str, dict[str, int]] = {}
+        for run, dataset, _model in results:
+            per_ds = protocol_counts.setdefault(dataset.id, {})
+            per_ds[run.protocol_id] = per_ds.get(run.protocol_id, 0) + 1
 
-        dominant_protocol = max(protocol_counts.keys(), key=lambda p: protocol_counts[p])
+        dominant_protocol_by_ds = {
+            ds_id: max(sorted(per_ds.keys()), key=lambda p: per_ds[p])
+            for ds_id, per_ds in protocol_counts.items()
+        }
 
         # Filter to runs with comparable protocol
         comparable_runs = [
             (run, dataset, model)
             for (run, dataset, model) in results
-            if run.protocol_id == dominant_protocol
+            if run.protocol_id == dominant_protocol_by_ds.get(dataset.id)
         ]
+        dominant_protocol = (
+            ", ".join(sorted({p for p in dominant_protocol_by_ds.values()}))
+            if dominant_protocol_by_ds
+            else "n/a"
+        )
 
-        # Group by model, select best run per model based on primary metric
-        # Missing metrics are excluded, never invented
+        # Group by model, select best run per model based on primary metric.
+        # E1: best-run selection is cohort-scoped — only runs evaluating the
+        # SAME selected sample IDs compete for a model's best score. A 10-sample
+        # 100% run and a 200-sample 85% run are different cohorts and cannot
+        # crown each other. The largest verified cohort wins the model slot.
+        # Missing metrics are excluded, never invented.
         model_candidates: dict[str, dict] = {}
+        cohort_sizes: dict[str, int] = {}
 
         for run, dataset, model in comparable_runs:
             # Determine primary metric key
@@ -121,17 +138,12 @@ class RecommendationEngine:
             )
             metric_obj = db.scalar(metric_stmt)
 
-            # Fallback if primary is balanced_score but faith eval recorded unanswerable_acc_strict
+            # E5: FaithEval balanced_score is only reported when controls were
+            # actually evaluated. Falling back to the unanswerable strict metric
+            # would silently rank models on a different quantity. Instead, skip
+            # the run unless a genuine balanced_score exists.
             if not metric_obj and dataset.id == "faitheval":
-                metric_stmt = select(BenchmarkMetric).where(
-                    BenchmarkMetric.run_id == run.id,
-                    BenchmarkMetric.metric_name.in_([
-                        "unanswerable_context_accuracy_strict",
-                        "unanswerable_context_accuracy",
-                        "unanswerable_acc_strict",
-                    ]),
-                )
-                metric_obj = db.scalar(metric_stmt)
+                continue
 
             if not metric_obj:
                 # Exclude run if primary metric missing
@@ -171,11 +183,22 @@ class RecommendationEngine:
             if constraints.min_quality is not None and quality < constraints.min_quality:
                 continue
 
-            # If model already seen, keep run with higher quality
-            if (
-                model.id not in model_candidates
-                or quality > model_candidates[model.id]["quality"]
-            ):
+            # If model already seen, keep run from the largest verified sample
+            # cohort; within the same cohort keep higher quality.
+            # Runs without persisted sample-selection metadata are excluded —
+            # their cohort cannot be verified (E1/D1).
+            cohort_raw = (run.sample_selection or {}).get("selected_sample_ids")
+            if not cohort_raw:
+                continue
+            cohort_key = tuple(sorted(cohort_raw))
+            cohort_size = len(cohort_key)
+            existing = model_candidates.get(model.id)
+            if existing is None or cohort_size > cohort_sizes[model.id] or cohort_size == cohort_sizes[model.id] and quality > existing["quality"]:
+                better = True
+            else:
+                better = False
+            if better:
+                cohort_sizes[model.id] = cohort_size
                 model_candidates[model.id] = {
                     "model_id": model.id,
                     "model_name": model.name,
@@ -183,6 +206,7 @@ class RecommendationEngine:
                     "latency": latency,
                     "vram": vram,
                     "run_id": run.id,
+                    "sample_count": len(cohort_key),
                 }
 
         eligible_models = list(model_candidates.values())
@@ -198,18 +222,24 @@ class RecommendationEngine:
                 explanation="Zero models eligible: all candidate models were filtered out by latency, VRAM, or minimum quality constraints.",
             )
 
+        # E6: the 3-model minimum is an architectural guard (ARCHITECTURE §10.2),
+        # not a hard product requirement. With 1-2 eligible models we still
+        # rank them, clearly labeling the small comparison set.
         if len(eligible_models) < 3:
-            return RecommendationResponse(
-                status="insufficient_sample",
-                domain=req.domain,
-                task_type=req.task_type,
-                recommendations=[],
-                eligible_count=len(eligible_models),
-                limitations=[
-                    f"Fewer than 3 comparable models available ({len(eligible_models)} found)"
-                ],
-                explanation="Need at least 3 comparable models evaluated under matching protocol to generate reliable recommendations.",
+            small_set_note = (
+                f"Only {len(eligible_models)} comparable model(s) available; "
+                "ranking is informational with a small comparison set"
             )
+            if len(eligible_models) == 0:
+                return RecommendationResponse(
+                    status="insufficient_sample",
+                    domain=req.domain,
+                    task_type=req.task_type,
+                    recommendations=[],
+                    eligible_count=0,
+                    limitations=["No models satisfied the hard constraints"],
+                    explanation="Zero models eligible: all candidate models were filtered out by latency, VRAM, or minimum quality constraints.",
+                )
 
         # Min-Max Normalization per ARCHITECTURE §10.2
         q_vals = [m["quality"] for m in eligible_models]
@@ -256,16 +286,23 @@ class RecommendationEngine:
             )
         )
 
+        # E3: VRAM values are model-weight estimates from the catalog
+        # (configs/models.yaml), NOT measured peak inference VRAM.
+        limitations = [
+            f"Evaluated on dominant protocol(s) '{dominant_protocol}' per dataset",
+            "Scores normalized min-max across eligible candidates",
+            "VRAM figures are estimated model-weight footprints from the model catalog, not measured peak inference memory",
+        ]
+        if len(eligible_models) < 3:
+            limitations.append(small_set_note)
+
         return RecommendationResponse(
             status="success",
             domain=req.domain,
             task_type=req.task_type,
             recommendations=ranked,
             eligible_count=len(eligible_models),
-            limitations=[
-                f"Evaluated on dominant protocol '{dominant_protocol}'",
-                "Scores normalized min-max across eligible candidates",
-            ],
+            limitations=limitations,
             explanation=(
                 f"Ranked {len(ranked)} models for domain '{req.domain}' using normalized weights: "
                 f"quality={w_quality:.2f}, latency={w_latency:.2f}, vram={w_vram:.2f}."

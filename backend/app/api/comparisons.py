@@ -46,6 +46,19 @@ def get_comparison(
     sample_sets: dict[str, list[str]] = {
         r.id: list((r.sample_selection or {}).get("selected_sample_ids") or []) for r in runs
     }
+    # D1: comparability evidence is REQUIRED. A run without persisted sample
+    # selection cannot prove it evaluated the same samples, so a scored
+    # side-by-side comparison would imply statistical comparability that the
+    # evidence does not support. Reject instead of silently proceeding.
+    missing_selection = [r.id for r in runs if not sample_sets[r.id]]
+    if missing_selection:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Runs are not comparable: missing sample-selection metadata "
+                f"for run(s) {missing_selection}; evaluated sample sets cannot be verified"
+            ),
+        )
     all_have_selection = all(sample_sets.values())
     if all_have_selection and len({frozenset(v) for v in sample_sets.values()}) > 1:
         incompatibilities.append("different sample IDs")

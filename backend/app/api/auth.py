@@ -18,6 +18,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 )
 def register(
     req: RegisterRequest,
+    response: Response,
     db: Session = Depends(get_db),
 ):
     try:
@@ -32,6 +33,19 @@ def register(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         ) from e
+    # F1: registration completes authentication. The frontend treats the
+    # returned user as signed-in, so a server-side session cookie must exist;
+    # otherwise every protected action after signup would 401.
+    _session, raw_token = AuthService.create_session(db=db, user_id=user.id)
+    response.set_cookie(
+        key="rapier_session",
+        value=raw_token,
+        max_age=604800,  # 7 days
+        path="/",
+        httponly=True,
+        samesite="lax",
+        secure=settings.SECURE_COOKIES,
+    )
     return user
 
 

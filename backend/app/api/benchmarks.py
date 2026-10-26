@@ -141,7 +141,11 @@ def get_benchmark_results(
 @router.get("/{id}/predictions", response_model=PaginatedPredictionsResponse)
 def get_benchmark_predictions(
     id: str,
-    status_filter: str | None = Query(None, alias="status"),
+    status_filter: str | None = Query(
+        None,
+        alias="status",
+        pattern=r"^(correct|incorrect|parse_failure|success|fallback|failed)$",
+    ),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: User | None = Depends(get_current_user_optional),
