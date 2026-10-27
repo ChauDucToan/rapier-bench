@@ -61,10 +61,14 @@ def test_full_api_flow(client, db_session, tmp_path):
     lb = client.get("/api/v1/leaderboard")
     groups = lb.json()["groups"]
     all_items = [i for g in groups for i in g["items"]]
-    assert all(i["run_id"] != "flow-fe" for i in all_items), "FaithEval strict-only leaked into leaderboard"
+    # F2: strict-only FaithEval run IS listed under its real metric name.
+    fe = [i for i in all_items if i["run_id"] == "flow-fe"]
+    assert len(fe) == 1
+    assert fe[0]["primary_metric_name"] == "unanswerable_context_accuracy_strict"
+    assert fe[0]["primary_metric_value"] == 0.9
     for g in groups:
         for i in g["items"]:
-            assert i["primary_metric_name"] in ("accuracy", "micro_f1", "balanced_accuracy", "balanced_score", "prompt_level_strict_acc")
+            assert i["primary_metric_name"] in ("accuracy", "micro_f1", "balanced_accuracy", "balanced_score", "prompt_level_strict_acc", "unanswerable_context_accuracy_strict")
     # grouped rendering: sciq group exists with 3 models
     sciq_groups = [g for g in groups if g["dataset_id"] == "sciq"]
     assert len(sciq_groups) == 1 and len(sciq_groups[0]["items"]) == 3

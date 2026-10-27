@@ -37,6 +37,10 @@ class GpuManager:
 
     @staticmethod
     def try_acquire(db: Session, run_id: str) -> bool:
+        # ponytail: idempotent, so a caller that never seeded the row (worker
+        # subprocess, direct test harness) acquires instead of waiting forever
+        # on an UPDATE that matches zero rows.
+        GpuManager.ensure_gpu_lock_row(db)
         now = utcnow()
         stmt = text(
             "UPDATE gpu_locks "

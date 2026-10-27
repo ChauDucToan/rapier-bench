@@ -27,7 +27,7 @@ Rapier Bench is a domain-aware, reproducible benchmarking platform for local ope
 | Suite ID | Domain | Task Type | Canonical Dataset | Primary Metric |
 | :--- | :--- | :--- | :--- | :--- |
 | `sciq` | Education | Multiple Choice | [`allenai/sciq`](https://huggingface.co/datasets/allenai/sciq) | `accuracy` |
-| `wdc_pave` | E-Commerce | Attribute-Value Extraction | [WDC-PAVE](https://github.com/wbsg-uni-mannheim/wdc-pave) | `micro_f1` |
+| `wdc_pave` | E-Commerce | Attribute-Value Extraction | [WDC-PAVE](https://github.com/wbsg-uni-mannheim/wdc-pave) | `micro_f1` (project-specific attribute-level metric) |
 | `legalbench_contract_nli` | Legal | Binary Classification | [`nguha/legalbench`](https://huggingface.co/datasets/nguha/legalbench) | `balanced_accuracy` |
 | `ifeval` | General | Instruction Following | [`google/IFEval`](https://huggingface.co/datasets/google/IFEval) | `prompt_level_strict_acc` |
 | `faitheval` | Faithfulness | Contextual Faithfulness | [`Salesforce/FaithEval`](https://huggingface.co/datasets/Salesforce/FaithEval-unanswerable-v1.0) | `unanswerable_context_accuracy_strict`* |

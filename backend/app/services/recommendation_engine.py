@@ -27,7 +27,11 @@ PRIMARY_METRIC_MAP = {
     "attribute_value_extraction": "micro_f1",
     "binary_classification": "balanced_accuracy",
     "instruction_following": "prompt_level_strict_acc",
-    "contextual_faithfulness": "balanced_score",
+    # F2: the default FaithEval protocol evaluates unanswerable contexts
+    # only; its legitimately measured primary metric is strict abstention
+    # accuracy. balanced_score requires the answerable-control protocol
+    # addition and is reported as a metric when present, never substituted.
+    "contextual_faithfulness": "unanswerable_context_accuracy_strict",
 }
 
 DATASET_PRIMARY_METRIC = {
@@ -35,7 +39,7 @@ DATASET_PRIMARY_METRIC = {
     "wdc_pave": "micro_f1",
     "legalbench_contract_nli": "balanced_accuracy",
     "ifeval": "prompt_level_strict_acc",
-    "faitheval": "balanced_score",
+    "faitheval": "unanswerable_context_accuracy_strict",
 }
 
 @dataclass
@@ -53,6 +57,9 @@ class _RunCandidate:
     selected_ids: tuple[str, ...]
     gpu_name: str | None
     hardware_key: str
+    created_at: object | None = None
+    dataset_revision: str | None = None
+    protocol_version: str | None = None
 
 
 def _finite(value: float, name: str) -> float:
@@ -87,8 +94,7 @@ def validate_and_normalize_weights(
 def _hardware_key(run: BenchmarkRun) -> str:
     """FIX 4: hardware comparability key. Latency is only comparable between
     runs whose recorded hardware environment matches on the dimensions that
-    materially affect generation speed. Missing GPU metadata is never assumed
-    equivalent to a known GPU."""
+    materially affect generation speed."""
     hw = run.hardware_metadata or {}
     gpu = hw.get("gpu_name")
     if not hw.get("gpu_available") or not gpu:
@@ -177,9 +183,12 @@ class RecommendationEngine:
             if not metric_obj:
                 continue
 
-            quality = _finite(metric_obj.metric_value, "quality metric")
-            if quality < 0.0:
+            # C2: corrupted stored measurements exclude THAT CANDIDATE; the
+            # request must still succeed for the remaining valid models.
+            q_raw = metric_obj.metric_value
+            if not isinstance(q_raw, (int, float)) or not math.isfinite(float(q_raw)) or float(q_raw) < 0.0:
                 continue
+            quality = float(q_raw)
 
             lat_obj = db.scalar(
                 select(BenchmarkMetric).where(
@@ -194,18 +203,27 @@ class RecommendationEngine:
             )
             latency_ms: float | None = None
             if lat_obj is not None:
-                lat = _finite(lat_obj.metric_value, "latency metric")
-                if lat < 0.0:
-                    continue
-                latency_ms = lat
+                lat_raw = lat_obj.metric_value
+                if not isinstance(lat_raw, (int, float)) or not math.isfinite(float(lat_raw)) or float(lat_raw) < 0.0:
+                    continue  # corrupted latency evidence: exclude candidate
+                latency_ms = float(lat_raw)
 
-            vram = _finite(model.vram_weight_gb, "vram_weight_gb")
+            vram_raw = model.vram_weight_gb
+            if not isinstance(vram_raw, (int, float)) or not math.isfinite(float(vram_raw)):
+                continue
+            vram = float(vram_raw)
 
             selection = run.sample_selection or {}
             selected_ids_raw = selection.get("selected_sample_ids")
             if not selected_ids_raw:
                 continue
             selected_ids = tuple(sorted(str(x) for x in selected_ids_raw))
+            # D1: capture the evaluation-identity metadata persisted at
+            # execution time (from run_config.json via the worker). Read from
+            # the run row — NOT from the mutable live registry — so cohort
+            # identity reflects what actually ran.
+            ds_revision = (selection.get("dataset_config") or {}).get("revision")
+            proto_version = (selection.get("protocol_config") or {}).get("version")
 
             candidates.append(
                 _RunCandidate(
@@ -222,24 +240,41 @@ class RecommendationEngine:
                     selected_ids=selected_ids,
                     gpu_name=(run.hardware_metadata or {}).get("gpu_name"),
                     hardware_key=_hardware_key(run),
+                    created_at=run.created_at,
+                    dataset_revision=ds_revision,
+                    protocol_version=proto_version,
                 )
             )
 
-        # Partition into cohorts.
+        # Partition into cohorts (D1): dataset revision and protocol version
+        # are part of the identity — the same sample IDs under a different
+        # dataset revision or protocol version are NOT the same evaluation.
         cohorts: dict[tuple, list[_RunCandidate]] = {}
         for c in candidates:
             cohorts.setdefault(
-                (c.dataset_id, c.protocol_id, c.split, c.selected_ids),
+                (
+                    c.dataset_id,
+                    c.protocol_id,
+                    c.split,
+                    c.selected_ids,
+                    c.dataset_revision,
+                    c.protocol_version,
+                ),
                 [],
             ).append(c)
 
         # Deterministic cohort choice: most distinct models, then largest
         # sample set, then lexicographic cohort key. Never select a cohort by
         # the quality of its best run (no cherry-picking).
+        def _cohort_sort_key(key: tuple) -> tuple:
+            # None-safe ordering for cohort keys (legacy rows carry None
+            # revision/version fields in the key).
+            return tuple(str(k) for k in key)
+
         def _cohort_score(key: tuple) -> tuple:
             runs = cohorts[key]
             models = {r.model_id for r in runs}
-            return (len(models), len(key[3]), tuple(reversed(key)))
+            return (len(models), len(key[3]), tuple(str(k) for k in reversed(key)))
 
         if not cohorts:
             return RecommendationResponse(
@@ -255,9 +290,9 @@ class RecommendationEngine:
                 explanation="Zero models eligible: runs lack comparable evaluation evidence.",
             )
 
-        best_cohort_key = max(sorted(cohorts.keys()), key=_cohort_score)
+        best_cohort_key = max(sorted(cohorts.keys(), key=_cohort_sort_key), key=_cohort_score)
         cohort_runs = cohorts[best_cohort_key]
-        dataset_id, protocol_id, split, selected_ids = best_cohort_key
+        dataset_id, protocol_id, split, selected_ids, _ds_rev, _proto_ver = best_cohort_key
 
         # A cohort with a single model has nothing to compare against; a
         # ranking needs at least two distinct models on the shared cohort.
@@ -279,30 +314,33 @@ class RecommendationEngine:
                 ),
             )
 
-        # Hardware comparability (FIX 4): latency is only comparable within one
-        # hardware key. If the cohort spans multiple hardware keys, pick the
-        # hardware key with the most distinct models (deterministic tie-break)
-        # and rank latency only among those runs. When latency weight is zero
-        # the whole cohort is usable regardless of hardware.
+        # Hardware comparability (FIX 4 + C1): latency is only comparable
+        # within one VERIFIED hardware key. 'unknown' (missing GPU metadata)
+        # is not evidence of a shared environment: latency from unverified
+        # runs is never treated as comparable speed evidence. When latency
+        # weight is zero the whole cohort is usable regardless of hardware.
         hw_groups: dict[str, list[_RunCandidate]] = {}
         for c in cohort_runs:
             hw_groups.setdefault(c.hardware_key, []).append(c)
 
-        if latency_weight_active and len(hw_groups) > 1:
+        unknown_hw = [c for c in cohort_runs if c.hardware_key == "unknown"]
+        known_hw_keys = [k for k in hw_groups if k != "unknown"]
+
+        if latency_weight_active and known_hw_keys:
+            # Rank latency only inside verified hardware groups.
             ranked_hw = sorted(
-                hw_groups.items(),
+                ((k, hw_groups[k]) for k in known_hw_keys),
                 key=lambda kv: (-len({r.model_id for r in kv[1]}), kv[0]),
             )
             chosen_hw_key, cohort_runs = ranked_hw[0]
         else:
             chosen_hw_key = cohort_runs[0].hardware_key if cohort_runs else "unknown"
 
-        # One run per model within the cohort: deterministic policy — the
-        # most recent completed run (highest run_id is NOT used; prefer the
-        # latest by creation we have: run_id is a UUID, so use insertion order
-        # of the DB result; fall back to first-seen). Keep it simple and
-        # disclosed: first eligible run per model in the cohort's canonical
-        # order, ties broken by quality (disclosed below).
+        # One run per model within the cohort (C3): deterministic LATEST run
+        # policy. Selecting the highest-scoring repeated run would create
+        # optimistic bias (max-of-N trials); selecting the latest is
+        # reproducible, explainable, and independent of the outcomes. Ties on
+        # created_at fall back to run_id for a total order.
         by_model: dict[str, _RunCandidate] = {}
         for c in cohort_runs:
             constraints_ok = True
@@ -317,8 +355,13 @@ class RecommendationEngine:
             if not constraints_ok:
                 continue
             existing = by_model.get(c.model_id)
-            # Within one model, deterministic: higher quality, then run_id.
-            if existing is None or (c.quality, c.run_id) > (existing.quality, existing.run_id):
+            # Latest created_at wins; run_id breaks exact ties deterministically.
+            # None-safe ordering: rows without created_at sort before any
+            # timestamp (defensive for corrupted/legacy rows).
+            def _order(cand: _RunCandidate) -> tuple:
+                return (cand.created_at is not None, cand.created_at or "", cand.run_id)
+
+            if existing is None or _order(c) > _order(existing):
                 by_model[c.model_id] = c
 
         eligible = list(by_model.values())
@@ -338,8 +381,14 @@ class RecommendationEngine:
 
         # FIX 4 disclosure: if latency cannot be compared (missing measurements
         # or mixed hardware), do not silently redistribute the latency weight.
-        latency_comparable = latency_weight_active and all(
-            c.latency_ms is not None for c in eligible
+        # C1: latency is comparable only when every eligible candidate has a
+        # measurement AND the ranking cohort is a VERIFIED hardware group.
+        # 'unknown' hardware (missing GPU metadata) is not evidence of a shared
+        # environment — latency from unverified runs is never speed evidence.
+        latency_comparable = (
+            latency_weight_active
+            and all(c.latency_ms is not None for c in eligible)
+            and chosen_hw_key != "unknown"
         )
 
         limitations: list[str] = [
@@ -352,15 +401,25 @@ class RecommendationEngine:
         ]
 
         if latency_weight_active:
-            if len(hw_groups) > 1:
+            if known_hw_keys and len(known_hw_keys) > 1:
                 limitations.append(
                     "Latency compared only across runs sharing the same recorded hardware "
                     f"environment (GPU/CUDA/torch: {chosen_hw_key}); other hardware groups excluded"
+                )
+            if unknown_hw:
+                limitations.append(
+                    f"{len(unknown_hw)} run(s) lack verified hardware metadata; their latency "
+                    "is not treated as comparable speed evidence"
                 )
             if missing_latency:
                 limitations.append(
                     f"{len(missing_latency)} model(s) lack latency measurements"
                 )
+        # C3: disclose the repeated-run selection policy.
+        limitations.append(
+            "When a model has multiple runs in the shared cohort, the LATEST run "
+            "represents it (no best-of-N cherry-picking)"
+        )
         if len(eligible) < 3:
             if len(eligible) <= 1:
                 limitations.append(

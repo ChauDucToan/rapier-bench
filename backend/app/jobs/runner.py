@@ -9,7 +9,7 @@ from sqlalchemy import update
 from app.config import settings
 from app.db.models import Artifact, BenchmarkMetric, BenchmarkRun, RunStatusEnum
 from app.db.session import SessionLocal
-from app.jobs.process_manager import process_start_token
+from app.jobs.process_manager import process_start_token, same_process
 from app.services.gpu_manager import GpuManager
 
 
@@ -19,6 +19,23 @@ def utcnow() -> datetime:
 
 def _sigterm_handler(signum, frame) -> None:
     sys.exit(0)
+
+
+def _holder_dead(db) -> bool:
+    """E1: True when the current GPU lock holder's worker is verifiably dead.
+
+    Uses the same PID + /proc start-token identity as startup reconciliation.
+    A holder with no identity row is treated as ALIVE (conservative: a legacy
+    row should not cause lock takeover while its worker may still run).
+    """
+    holder = GpuManager.get_holder(db)
+    if not holder:
+        return False
+    holder_run = db.get(BenchmarkRun, holder)
+    if holder_run is None:
+        return False
+    return not same_process(holder_run.worker_pid, holder_run.worker_start_ts)
+
 
 
 signal.signal(signal.SIGTERM, _sigterm_handler)
@@ -57,13 +74,46 @@ def main() -> None:
             curr = db.get(BenchmarkRun, run_id, populate_existing=True)
             return bool(curr and curr.cancel_requested)
 
-        acquired = GpuManager.acquire(
-            db,
-            run_id,
-            timeout_sec=120.0,
-            interval_sec=1.0,
-            cancel_check=cancel_check,
-        )
+        # E1: queue semantics. A second job legitimately waits behind a
+        # long-running benchmark — waiting is NOT failure. The worker waits
+        # indefinitely (cancel-aware) instead of failing after 120 s. Two
+        # bounded escape hatches keep the wait safe:
+        #   - cancellation (checked every poll)
+        #   - the lock holder's worker dying (checked every 30 s): then the
+        #     lock is stale and this worker takes it over.
+        import time as _time
+
+        _last_holder_liveness = 0.0
+
+        while True:
+            try:
+                if cancel_check():
+                    break
+                if GpuManager.try_acquire(db, run_id):
+                    break
+                # Periodic dead-holder takeover check (every 30 s).
+                now = _time.monotonic()
+                if now - _last_holder_liveness >= 30.0:
+                    _last_holder_liveness = now
+                    if _holder_dead(db):
+                        # Stale lock from a crashed worker: recover it.
+                        GpuManager.release(db)
+                        continue
+            except Exception as exc:
+                # E2: a DB error inside the queue loop must not strand the run
+                # in QUEUED forever — mark it FAILED with the underlying error
+                # so the user sees actionable diagnostics.
+                db.rollback()
+                run = db.get(BenchmarkRun, run_id)
+                if run is not None:
+                    run.status = RunStatusEnum.FAILED
+                    run.error_text = f"GPU queue loop error: {exc}"
+                    run.completed_at = utcnow()
+                    db.commit()
+                sys.exit(1)
+            _time.sleep(1.0)
+
+        acquired = bool(GpuManager.is_locked(db) and GpuManager.get_holder(db) == run_id)
 
         if not acquired:
             db.refresh(run)
@@ -74,7 +124,7 @@ def main() -> None:
                 sys.exit(0)
             else:
                 run.status = RunStatusEnum.FAILED
-                run.error_text = "Timed out waiting to acquire GPU lock"
+                run.error_text = "Could not acquire GPU lock"
                 run.completed_at = utcnow()
                 db.commit()
                 sys.exit(1)

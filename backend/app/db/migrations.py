@@ -108,6 +108,23 @@ def _migrate_benchmark_runs_nullable_sample_count(engine: Engine) -> None:
         try:
             from app.db.models import BenchmarkRun
 
+            # A1: SQLite index names are database-global. The legacy table's
+            # indexes (e.g. ix_benchmark_runs_status) collide with the
+            # replacement table's same-named indexes if both exist. Drop the
+            # legacy indexes BEFORE creating the replacement — they are
+            # recreated by the model DDL on the new table. Child-table indexes
+            # are untouched (different names).
+            with connection.begin():
+                legacy_indexes = [
+                    row[1]
+                    for row in connection.exec_driver_sql(
+                        "PRAGMA index_list(benchmark_runs)"
+                    ).fetchall()
+                    if row[3] != "pk"  # skip the implicit PK index
+                ]
+                for idx in legacy_indexes:
+                    connection.exec_driver_sql(f'DROP INDEX IF EXISTS "{idx}"')
+
             # Create the replacement under a temp name with the full CURRENT
             # model schema (columns, PK, FKs, indexes) — same DDL the model
             # would emit, under a temporary name.

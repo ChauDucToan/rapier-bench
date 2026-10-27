@@ -93,9 +93,9 @@ def _recommend(client: TestClient, body: dict | None = None):
 
 
 class TestFaithEvalMetricIntegrity:
-    def test_leaderboard_excludes_faitheval_without_balanced_score(self, client: TestClient, db_session: Session):
-        """Unanswerable-only runs (strict present, balanced_score absent) must not
-        appear on the leaderboard at all — never labeled balanced_score."""
+    def test_leaderboard_shows_strict_only_run_under_real_name(self, client: TestClient, db_session: Session):
+        """F2: unanswerable-only runs (the default FaithEval protocol) appear on
+        the leaderboard under their ACTUAL metric name — never balanced_score."""
         user = _user(db_session, "fe_user")
         _run(
             db_session,
@@ -113,29 +113,14 @@ class TestFaithEvalMetricIntegrity:
         res = client.get("/api/v1/leaderboard?domain=contextual_faithfulness")
         assert res.status_code == 200
         items = [i for g in res.json()["groups"] for i in g["items"]]
-        assert all(i["run_id"] != "fe-run-1" for i in items)
-
-    def test_leaderboard_includes_faitheval_with_balanced_score(self, client: TestClient, db_session: Session):
-        user = _user(db_session, "fe_user2")
-        _run(
-            db_session,
-            "fe-run-2",
-            user.id,
-            "lumma-0.6b",
-            dataset_id="faitheval",
-            protocol_id="faitheval_unanswerable_v1",
-            selected_ids=[f"faitheval:test:{i}" for i in range(10)],
-            metrics={"balanced_score": 0.72},
-        )
-        res = client.get("/api/v1/leaderboard?domain=contextual_faithfulness")
-        assert res.status_code == 200
-        items = [i for g in res.json()["groups"] for i in g["items"]]
-        match = [i for i in items if i["run_id"] == "fe-run-2"]
+        match = [i for i in items if i["run_id"] == "fe-run-1"]
         assert len(match) == 1
-        assert match[0]["primary_metric_name"] == "balanced_score"
-        assert match[0]["primary_metric_value"] == 0.72
+        assert match[0]["primary_metric_name"] == "unanswerable_context_accuracy_strict"
+        assert match[0]["primary_metric_value"] == 0.9
 
-    def test_recommendation_excludes_faitheval_without_balanced_score(self, client: TestClient, db_session: Session):
+    def test_recommendation_ranks_strict_only_faitheval_under_real_name(self, client: TestClient, db_session: Session):
+        """F2: recommendation uses the FaithEval protocol's actual primary
+        metric; strict-only runs are rankable, never mislabeled balanced_score."""
         user = _user(db_session, "fe_user3")
         _run(
             db_session,
@@ -150,12 +135,24 @@ class TestFaithEvalMetricIntegrity:
                 "latency_ms_mean": 30.0,
             },
         )
+        _run(
+            db_session,
+            "fe-run-4",
+            user.id,
+            "apertus-0.5b",
+            dataset_id="faitheval",
+            protocol_id="faitheval_unanswerable_v1",
+            selected_ids=[f"faitheval:test:{i}" for i in range(10)],
+            metrics={
+                "unanswerable_context_accuracy_strict": 0.7,
+                "latency_ms_mean": 35.0,
+            },
+        )
         res = _recommend(client, {"domain": "contextual_faithfulness"})
-        assert res.status_code == 200
         data = res.json()
-        assert data["status"] == "insufficient_sample"
-        assert all(r["run_id"] != "fe-run-3" for r in data["recommendations"])
-
+        # Both models rank under the ACTUAL FaithEval protocol metric.
+        assert data["status"] == "success"
+        assert {r["run_id"] for r in data["recommendations"]} == {"fe-run-3", "fe-run-4"}
 
 # ---------------------------------------------------------------------------
 # FIX 2: common-cohort selection

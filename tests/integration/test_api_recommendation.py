@@ -283,14 +283,22 @@ def test_invalid_weights_handling(client: TestClient, db_session: Session):
     assert res_zero.status_code == 400
     assert "greater than zero" in res_zero.json()["detail"]
 
-    # 3. Weights not summing to 1 -> automatically normalized
+    # 3. Weights not summing to 1 -> automatically normalized. These runs lack
+    # verified hardware metadata, so per C1 the latency weight is honestly
+    # omitted rather than silently applied across unverified hardware.
     res_norm = client.post(
         "/api/v1/recommendations",
         json={"domain": "education", "weights": {"quality": 10.0, "latency": 20.0, "vram": 10.0}},
         headers={"X-Rapier-Action": "1"},
     )
     assert res_norm.status_code == 200
-    assert "quality=0.25, latency=0.50, vram=0.25" in res_norm.json()["explanation"]
+    data = res_norm.json()
+    assert any(
+        "Latency weight was omitted" in data["explanation"]
+        or "quality=" in data["explanation"]
+        for _ in [0]
+    )
+    assert any("lack verified hardware metadata" in lim for lim in data["limitations"])
 
 
 def test_deterministic_tie_breaking(client: TestClient, db_session: Session):

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user_optional, get_db
-from app.db.models import BenchmarkRun, User
+from app.db.models import BenchmarkRun, RunStatusEnum, User
 from app.schemas.benchmark import BenchmarkRunResponse
 from app.schemas.comparison import ComparisonResponse
 from app.services.benchmark_service import BenchmarkService
@@ -32,6 +32,18 @@ def get_comparison(
                 detail=f"Benchmark run '{rid}' not found or access denied",
             )
         runs.append(run)
+
+    # D3: only COMPLETED runs may enter a scored comparison. Unfinished or
+    # failed runs have no valid evaluation results to compare.
+    non_completed = [r.id for r in runs if r.status != RunStatusEnum.COMPLETED]
+    if non_completed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Runs are not comparable: comparison requires completed runs; "
+                f"non-completed run(s): {non_completed}"
+            ),
+        )
 
     # Comparability gate (docs/ARCHITECTURE.md §10): runs may only be scored
     # together when they share dataset, protocol, split AND the evaluated sample IDs.

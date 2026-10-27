@@ -1,5 +1,11 @@
-"""FIX 5 regression: legacy SQLite databases must upgrade to nullable
-sample_count without data loss, and the migration must be idempotent."""
+"""A1/FIX 5 regression: legacy SQLite databases must upgrade to nullable
+sample_count without data loss, and the migration must be idempotent.
+
+The legacy fixture reproduces the historical schema INCLUDING the real
+named indexes (ix_benchmark_runs_user_id, ix_benchmark_runs_model_id,
+ix_benchmark_runs_dataset_id, ix_benchmark_runs_status) — SQLite index
+names are database-global, so the rebuild must handle the collision.
+"""
 
 import sqlite3
 from pathlib import Path
@@ -7,8 +13,8 @@ from pathlib import Path
 from app.db.migrations import run_startup_migrations
 from sqlalchemy import create_engine, text
 
-# Exact schema of benchmark_runs as of e05078e (sample_count NOT NULL,
-# no worker identity columns).
+# Legacy schema as emitted by the SQLAlchemy models at e05078e:
+# sample_count INTEGER NOT NULL, no worker identity columns, real indexes.
 LEGACY_DDL = """
 CREATE TABLE benchmark_runs (
     id VARCHAR(36) NOT NULL,
@@ -37,20 +43,26 @@ CREATE TABLE benchmark_runs (
     FOREIGN KEY(model_id) REFERENCES model_definitions (id),
     FOREIGN KEY(dataset_id) REFERENCES dataset_definitions (id),
     FOREIGN KEY(protocol_id) REFERENCES benchmark_protocols (id)
-)
+);
+CREATE INDEX ix_benchmark_runs_user_id ON benchmark_runs (user_id);
+CREATE INDEX ix_benchmark_runs_model_id ON benchmark_runs (model_id);
+CREATE INDEX ix_benchmark_runs_dataset_id ON benchmark_runs (dataset_id);
+CREATE INDEX ix_benchmark_runs_status ON benchmark_runs (status);
+"""
+
+LEGACY_DEPS = """
+CREATE TABLE users (id INTEGER NOT NULL PRIMARY KEY, username VARCHAR(64), email VARCHAR(255), password_hash VARCHAR(255), created_at DATETIME DEFAULT (CURRENT_TIMESTAMP));
+CREATE TABLE model_definitions (id VARCHAR(64) NOT NULL PRIMARY KEY, name VARCHAR(128), hf_id VARCHAR(255), revision VARCHAR(64), parameters INTEGER, context_length INTEGER, torch_dtype VARCHAR(32), vram_weight_gb FLOAT, trust_remote_code BOOLEAN, license VARCHAR(64));
+CREATE TABLE dataset_definitions (id VARCHAR(64) NOT NULL PRIMARY KEY, name VARCHAR(128), hf_id VARCHAR(255), domain VARCHAR(64), task_type VARCHAR(64), default_split VARCHAR(32), evaluator_key VARCHAR(64));
+CREATE TABLE benchmark_protocols (id VARCHAR(64) NOT NULL PRIMARY KEY, dataset_id VARCHAR(64), name VARCHAR(128), version VARCHAR(32), prompt_template TEXT, expected_answer_format VARCHAR(64), FOREIGN KEY(dataset_id) REFERENCES dataset_definitions (id));
+CREATE TABLE benchmark_metrics (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, run_id VARCHAR(36) NOT NULL, metric_name VARCHAR(64), metric_value FLOAT, FOREIGN KEY(run_id) REFERENCES benchmark_runs (id) ON DELETE CASCADE);
+CREATE TABLE artifacts (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, run_id VARCHAR(36) NOT NULL, artifact_type VARCHAR(64), relative_path VARCHAR(255), file_size_bytes INTEGER, created_at DATETIME, FOREIGN KEY(run_id) REFERENCES benchmark_runs (id) ON DELETE CASCADE);
 """
 
 
 def _make_legacy_db(path: str) -> None:
     con = sqlite3.connect(path)
-    con.executescript(
-        """
-        CREATE TABLE users (id INTEGER NOT NULL PRIMARY KEY, username VARCHAR(64), email VARCHAR(255), password_hash VARCHAR(255), created_at DATETIME DEFAULT (CURRENT_TIMESTAMP));
-        CREATE TABLE model_definitions (id VARCHAR(64) NOT NULL PRIMARY KEY, name VARCHAR(128), hf_id VARCHAR(255), revision VARCHAR(64), parameters INTEGER, context_length INTEGER, torch_dtype VARCHAR(32), vram_weight_gb FLOAT, trust_remote_code BOOLEAN, license VARCHAR(64));
-        CREATE TABLE dataset_definitions (id VARCHAR(64) NOT NULL PRIMARY KEY, name VARCHAR(128), hf_id VARCHAR(255), domain VARCHAR(64), task_type VARCHAR(64), default_split VARCHAR(32), evaluator_key VARCHAR(64));
-        CREATE TABLE benchmark_protocols (id VARCHAR(64) NOT NULL PRIMARY KEY, dataset_id VARCHAR(64), name VARCHAR(128), version VARCHAR(32), prompt_template TEXT, expected_answer_format VARCHAR(64), FOREIGN KEY(dataset_id) REFERENCES dataset_definitions (id));
-        """
-    )
+    con.executescript(LEGACY_DEPS)
     con.executescript(LEGACY_DDL)
     con.execute(
         "INSERT INTO users (id, username, email, password_hash) VALUES (1, 'legacy', 'legacy@test.com', 'x')"
@@ -73,17 +85,6 @@ def _make_legacy_db(path: str) -> None:
     )
     # Dependent rows referencing benchmark_runs (FK survival must be tested).
     con.execute(
-        "CREATE TABLE benchmark_metrics (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
-        "run_id VARCHAR(36) NOT NULL, metric_name VARCHAR(64), metric_value FLOAT, "
-        "FOREIGN KEY(run_id) REFERENCES benchmark_runs (id) ON DELETE CASCADE)"
-    )
-    con.execute(
-        "CREATE TABLE artifacts (id INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT, "
-        "run_id VARCHAR(36) NOT NULL, artifact_type VARCHAR(64), relative_path VARCHAR(255), "
-        "file_size_bytes INTEGER, created_at DATETIME, "
-        "FOREIGN KEY(run_id) REFERENCES benchmark_runs (id) ON DELETE CASCADE)"
-    )
-    con.execute(
         "INSERT INTO benchmark_metrics (run_id, metric_name, metric_value) VALUES ('legacy-run-1', 'accuracy', 0.9)"
     )
     con.execute(
@@ -104,13 +105,25 @@ def _apply_app_startup(path: str):
     return engine
 
 
+class _NotNullFailure:
+    """Context manager: assert sqlite3 NOT NULL constraint failure."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        assert exc_type is not None, "expected NOT NULL constraint failure"
+        assert "NOT NULL" in str(exc), f"unexpected error: {exc}"
+        return True
+
+
 def test_legacy_db_upgrade_preserves_data_and_allows_null(tmp_path: Path):
     db = str(tmp_path / "legacy.db")
     _make_legacy_db(db)
 
     # Pre-check: legacy constraint reproduces the defect.
     con = sqlite3.connect(db)
-    with pytest_raises_not_null():
+    with _NotNullFailure():
         con.execute(
             "INSERT INTO benchmark_runs (id, user_id, model_id, dataset_id, protocol_id, sample_count) "
             "VALUES ('x', 1, 'm1', 'sciq', 'sciq_evidence_grounded', NULL)"
@@ -163,6 +176,15 @@ def test_migration_is_idempotent(tmp_path: Path):
                 text("SELECT sample_count FROM benchmark_runs WHERE id='legacy-run-1'")
             ).scalar()
             assert row == 10
+            # No leftover temporary tables.
+            tables = {
+                r[0]
+                for r in conn.exec_driver_sql(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            assert "benchmark_runs_old" not in tables
+            assert "benchmark_runs_new" not in tables
     finally:
         engine2.dispose()
 
@@ -183,6 +205,30 @@ def test_fresh_db_unaffected(tmp_path: Path):
         engine.dispose()
 
 
+def test_indexes_preserved_after_rebuild(tmp_path: Path):
+    """A1: the real legacy indexes must exist on the rebuilt table."""
+    db = str(tmp_path / "legacy_idx.db")
+    _make_legacy_db(db)
+    engine = _apply_app_startup(db)
+    try:
+        with engine.begin() as conn:
+            idx = [
+                r[1]
+                for r in conn.exec_driver_sql("PRAGMA index_list(benchmark_runs)").fetchall()
+            ]
+            assert "ix_benchmark_runs_user_id" in idx
+            assert "ix_benchmark_runs_model_id" in idx
+            assert "ix_benchmark_runs_dataset_id" in idx
+            assert "ix_benchmark_runs_status" in idx
+            # Index is functional: query plan uses it.
+            plan = conn.exec_driver_sql(
+                "EXPLAIN QUERY PLAN SELECT * FROM benchmark_runs WHERE status='completed'"
+            ).fetchall()
+            assert any("ix_benchmark_runs_status" in str(p) for p in plan), plan
+    finally:
+        engine.dispose()
+
+
 def test_foreign_keys_preserved_after_rebuild(tmp_path: Path):
     db = str(tmp_path / "legacy3.db")
     _make_legacy_db(db)
@@ -196,6 +242,9 @@ def test_foreign_keys_preserved_after_rebuild(tmp_path: Path):
             assert "model_definitions" in targets
             assert "dataset_definitions" in targets
             assert "benchmark_protocols" in targets
+            # No FK violations remain anywhere.
+            violations = conn.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+            assert violations == [], violations
     finally:
         engine.dispose()
 
@@ -208,7 +257,6 @@ def test_dependent_rows_survive_rebuild_and_stay_linked(tmp_path: Path):
     engine = _apply_app_startup(db)
     try:
         with engine.begin() as conn:
-            # Dependent rows still exist and link to the rebuilt parent.
             m = conn.execute(
                 text("SELECT COUNT(*) FROM benchmark_metrics WHERE run_id='legacy-run-1'")
             ).scalar()
@@ -217,35 +265,20 @@ def test_dependent_rows_survive_rebuild_and_stay_linked(tmp_path: Path):
                 text("SELECT COUNT(*) FROM artifacts WHERE run_id='legacy-run-1'")
             ).scalar()
             assert a == 1
-            # FK enforcement on the rebuilt relationship works: inserting a
-            # child row with a bogus run_id must fail. Run on a separate
-            # connection so the failing statement cannot abort this
-            # transaction.
-            import sqlite3
-
-            probe = sqlite3.connect(db)
-            try:
-                probe.execute("PRAGMA foreign_keys=ON")
-                probe.execute(
-                    "INSERT INTO benchmark_metrics (run_id, metric_name, metric_value) "
-                    "VALUES ('nonexistent-run', 'x', 1.0)"
-                )
-                raise AssertionError("FK constraint not enforced after rebuild")
-            except sqlite3.IntegrityError:
-                pass
-            finally:
-                probe.close()
+        # FK enforcement on the rebuilt relationship works: inserting a
+        # child row with a bogus run_id must fail. Run on a separate
+        # connection so the failing statement cannot abort this transaction.
+        probe = sqlite3.connect(db)
+        try:
+            probe.execute("PRAGMA foreign_keys=ON")
+            probe.execute(
+                "INSERT INTO benchmark_metrics (run_id, metric_name, metric_value) "
+                "VALUES ('nonexistent-run', 'x', 1.0)"
+            )
+            raise AssertionError("FK constraint not enforced after rebuild")
+        except sqlite3.IntegrityError:
+            pass
+        finally:
+            probe.close()
     finally:
         engine.dispose()
-
-
-class pytest_raises_not_null:
-    """Tiny context manager: assert sqlite3.IntegrityError NOT NULL."""
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        assert exc_type is not None, "expected NOT NULL constraint failure"
-        assert "NOT NULL" in str(exc), f"unexpected error: {exc}"
-        return True

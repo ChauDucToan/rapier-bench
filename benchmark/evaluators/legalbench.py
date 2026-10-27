@@ -119,10 +119,15 @@ class LegalBenchEvaluator(BaseEvaluator):
 
             pos_total = tp + fn
             neg_total = tn + fp
+            missing_class = pos_total == 0 or neg_total == 0
             rec_yes = (tp / pos_total) if pos_total > 0 else 0.0
             rec_no = (tn / neg_total) if neg_total > 0 else 0.0
             bal_acc = (rec_yes + rec_no) / 2.0
-            subtask_balanced_accs.append(bal_acc)
+            # F1: a subtask with an absent class has an UNMEASURABLE balanced
+            # accuracy — its 0-recall placeholder must not enter the macro
+            # mean as though it were a measured poor score.
+            if not missing_class:
+                subtask_balanced_accs.append(bal_acc)
 
             # Record task-level metrics
             sub_key = subtask_name.replace("contract_nli_", "")
@@ -131,10 +136,9 @@ class LegalBenchEvaluator(BaseEvaluator):
             # B4: disclose per-subtask denominators so an underrepresented
             # subtask is visible instead of silently shrinking the macro mean.
             metrics[f"{sub_key}_samples"] = float(len(sub_pairs))
-            if pos_total == 0 or neg_total == 0:
-                # B4: absent class -> balanced accuracy is not measurable for
-                # this subtask; record it as 0 but flag via the missing-class
-                # metric rather than presenting an undefined value as measured.
+            if missing_class:
+                # B4/F1: absent class -> balanced accuracy is not measurable for
+                # this subtask; flag it and keep it out of the macro mean.
                 metrics[f"{sub_key}_missing_class"] = 1.0
 
         macro_bal_acc = (

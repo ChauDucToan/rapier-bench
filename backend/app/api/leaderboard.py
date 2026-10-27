@@ -105,8 +105,12 @@ def get_leaderboard(
             completed_at=run.completed_at,
         )
 
-        # Cohort key excludes model: models compete WITHIN a cohort.
-        cohort = (dataset.id, run.protocol_id, run.split, selected_ids)
+        # Cohort key excludes model: models compete WITHIN a cohort. D1:
+        # dataset revision and protocol version (persisted at execution time
+        # in sample_selection via run_config.json) are part of the identity.
+        ds_revision = (selection.get("dataset_config") or {}).get("revision")
+        proto_version = (selection.get("protocol_config") or {}).get("version")
+        cohort = (dataset.id, run.protocol_id, run.split, selected_ids, ds_revision, proto_version)
         model_key = (cohort, model.id)
         existing = best_by_cohort_model.get(model_key)
         if not existing or item.primary_metric_value > existing.primary_metric_value:

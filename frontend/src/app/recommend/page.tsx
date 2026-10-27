@@ -308,7 +308,7 @@ export default function RecommendPage() {
               </h3>
               <p className="text-sm text-amber-300">
                 {result.explanation ||
-                  "Fewer than 3 unique models have completed evaluation runs for this domain/task. No synthetic rankings are generated."}
+                  "No comparable evaluation cohort with two or more models exists for this domain/task. Runs on different sample sets, protocols, or splits cannot be ranked together."}
               </p>
               {result.limitations && result.limitations.length > 0 && (
                 <ul className="list-disc list-inside text-xs text-amber-400 space-y-1 pt-1">
