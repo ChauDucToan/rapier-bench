@@ -72,3 +72,58 @@ def test_small_limit_still_exactly_limit():
     sizes = dict(zip(_S, [100] * 5, strict=True))
     samples = _run_selection(sizes, 6)
     assert len(samples) == 6
+
+
+def test_imbalanced_tiny_subtasks_get_coverage():
+    # FIX 6: [1,1,1,1,1000] limit=5 — old proportional rule gave [0,0,0,0,5].
+    # Guarantee: every nonempty subtask contributes >=1 when limit >= count.
+    sizes = dict(zip(_S, [1, 1, 1, 1, 1000], strict=True))
+    samples = _run_selection(sizes, 5)
+    assert len(samples) == 5
+    got = [s.metadata["subtask"] for s in samples]
+    assert sorted(got) == _S, f"coverage broken: {sorted(got)}"
+
+
+def test_moderately_imbalanced_coverage():
+    sizes = dict(zip(_S, [1, 2, 3, 4, 1000], strict=True))
+    samples = _run_selection(sizes, 10)
+    assert len(samples) == 10
+    got = {s.metadata["subtask"] for s in samples}
+    assert got == set(_S)
+
+
+def test_zero_size_subtask_excluded():
+    # A subtask with zero rows cannot contribute; others get coverage.
+    sizes = dict(zip(_S, [0, 1, 1, 1, 100], strict=True))
+    samples = _run_selection(sizes, 5)
+    assert len(samples) == 5
+    got = {s.metadata["subtask"] for s in samples}
+    assert _S[0] not in got
+    assert {s for s in _S[1:]} <= got
+
+
+def test_realistic_distribution_exact_limit():
+    sizes = dict(zip(_S, [82, 208, 142, 178, 180], strict=True))
+    samples = _run_selection(sizes, 100)
+    assert len(samples) == 100
+    assert {s.metadata["subtask"] for s in samples} == set(_S)
+
+
+def test_limit_below_subtask_count_documented_policy():
+    # limit=3 with 5 nonempty subtasks: full coverage impossible. Policy:
+    # deterministic proportional subset (exact total still guaranteed).
+    sizes = dict(zip(_S, [100] * 5, strict=True))
+    samples = _run_selection(sizes, 3)
+    assert len(samples) == 3
+
+
+def test_quota_never_exceeds_subtask_size():
+    sizes = dict(zip(_S[:2], [2, 100], strict=True))
+    for limit in range(1, 6):
+        samples = _run_selection(sizes, limit)
+        assert len(samples) == limit, f"limit={limit}"
+        per = {}
+        for s in samples:
+            per[s.metadata["subtask"]] = per.get(s.metadata["subtask"], 0) + 1
+        for subtask, count in per.items():
+            assert count <= sizes[subtask], f"quota exceeds size: {subtask}={count}"

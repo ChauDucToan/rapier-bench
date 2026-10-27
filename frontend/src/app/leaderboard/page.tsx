@@ -11,7 +11,7 @@ import {
   formatVram,
 } from "@/lib/formatters";
 import { EmptyState, ErrorState, LoadingState } from "@/components/StatusState";
-import type { LeaderboardItem } from "@/types/api";
+import type { LeaderboardGroup } from "@/types/api";
 
 const DOMAIN_OPTIONS = [
   { value: "", label: "All Domains" },
@@ -23,7 +23,7 @@ const DOMAIN_OPTIONS = [
 ];
 
 export default function LeaderboardPage() {
-  const [items, setItems] = useState<LeaderboardItem[]>([]);
+  const [groups, setGroups] = useState<LeaderboardGroup[]>([]);
   const [domainFilter, setDomainFilter] = useState("");
   const [taskFilter, setTaskFilter] = useState("");
   const [loading, setLoading] = useState(true);
@@ -38,7 +38,7 @@ export default function LeaderboardPage() {
       })
       .then((res) => {
         if (!ignore) {
-          setItems(res.items || []);
+          setGroups(res.groups || []);
           setLoading(false);
         }
       })
@@ -66,7 +66,7 @@ export default function LeaderboardPage() {
         task_type: taskFilter || undefined,
       })
       .then((res) => {
-        setItems(res.items || []);
+        setGroups(res.groups || []);
         setLoading(false);
       })
       .catch((err) => {
@@ -162,7 +162,7 @@ export default function LeaderboardPage() {
           message={error}
           onRetry={handleRetry}
         />
-      ) : items.length === 0 ? (
+      ) : groups.length === 0 ? (
         <EmptyState
           title="No completed public runs exist yet"
           message="Leaderboard rankings populate strictly from historical public benchmark runs. No synthetic or placeholder data is displayed."
@@ -170,81 +170,96 @@ export default function LeaderboardPage() {
           actionLabel="Execute a Benchmark"
         />
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/60">
-          <table className="w-full text-left text-sm text-zinc-300">
-            <caption className="sr-only">Model Leaderboard Table</caption>
-            <thead className="border-b border-zinc-800 bg-zinc-950/80 text-xs uppercase text-zinc-400">
-              <tr>
-                <th scope="col" className="px-4 py-3">Rank</th>
-                <th scope="col" className="px-4 py-3">Model</th>
-                <th scope="col" className="px-4 py-3">Domain</th>
-                <th scope="col" className="px-4 py-3">Task</th>
-                <th scope="col" className="px-4 py-3">Primary Metric</th>
-                <th scope="col" className="px-4 py-3">Latency</th>
-                <th scope="col" className="px-4 py-3">VRAM (est.)</th>
-                <th scope="col" className="px-4 py-3">Samples</th>
-                <th scope="col" className="px-4 py-3">Run ID</th>
-                <th scope="col" className="px-4 py-3">Completed</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800/80">
-              {items.map((item, idx) => (
-                <tr key={`${item.run_id}-${idx}`} className="hover:bg-zinc-800/40">
-                  <td className="px-4 py-3 font-semibold text-white whitespace-nowrap">
-                    #{idx + 1}
-                  </td>
-                  <td className="px-4 py-3 font-medium text-white whitespace-nowrap">
-                    <div>{item.model_name || item.model_id}</div>
-                    <div className="font-mono text-xs text-zinc-500">
-                      {item.model_id}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap">
-                    <span className="inline-flex items-center rounded bg-zinc-800 px-2 py-0.5 text-xs text-zinc-300">
-                      {item.domain}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-zinc-400 whitespace-nowrap">
-                    {item.task_type}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap font-mono font-bold text-emerald-400">
-                    <div>
-                      {formatMetricValue(
-                        item.primary_metric_name,
-                        item.primary_metric_value,
-                      )}
-                    </div>
-                    <span className="text-[10px] text-zinc-500 font-sans font-normal">
-                      {formatMetricName(item.primary_metric_name)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-xs text-zinc-300">
-                    {formatLatency(item.avg_latency_ms)}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-xs text-zinc-300">
-                    {/* Model-weight estimate from catalog, not measured peak */}
-                    <span title="Estimated model-weight footprint (catalog), not measured peak inference VRAM">
-                      {formatVram(item.vram_weight_gb)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-zinc-400">
-                    {item.sample_count}
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-indigo-400 whitespace-nowrap">
-                    <Link
-                      href={`/benchmarks/${item.run_id}`}
-                      className="hover:underline"
-                    >
-                      {item.run_id.slice(0, 8)}...
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-zinc-500 whitespace-nowrap">
-                    {formatDate(item.completed_at)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-8">
+          {groups.map((group) => (
+            <section
+              key={`${group.dataset_id}-${group.protocol_id}-${group.split}-${group.cohort_id ?? ""}`}
+              aria-label={`${group.dataset_id} leaderboard`}
+              className="space-y-3"
+            >
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <h2 className="text-lg font-semibold text-white">
+                  {group.dataset_id}
+                </h2>
+                <span className="font-mono text-xs text-zinc-400">
+                  {group.protocol_id} · split: {group.split} ·{" "}
+                  {group.sample_count ?? "—"} samples
+                </span>
+              </div>
+              <p className="text-xs text-zinc-500">
+                Ranks compare only runs sharing this dataset, protocol, split,
+                and evaluated sample set.
+              </p>
+              <div className="overflow-x-auto rounded-xl border border-zinc-800 bg-zinc-900/60">
+                <table className="w-full text-left text-sm text-zinc-300">
+                  <caption className="sr-only">
+                    {group.dataset_id} comparable cohort leaderboard
+                  </caption>
+                  <thead className="border-b border-zinc-800 bg-zinc-950/80 text-xs uppercase text-zinc-400">
+                    <tr>
+                      <th scope="col" className="px-4 py-3">Rank</th>
+                      <th scope="col" className="px-4 py-3">Model</th>
+                      <th scope="col" className="px-4 py-3">Primary Metric</th>
+                      <th scope="col" className="px-4 py-3">Latency</th>
+                      <th scope="col" className="px-4 py-3">VRAM (est.)</th>
+                      <th scope="col" className="px-4 py-3">Samples</th>
+                      <th scope="col" className="px-4 py-3">Run ID</th>
+                      <th scope="col" className="px-4 py-3">Completed</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800/80">
+                    {group.items.map((item, idx) => (
+                      <tr key={`${item.run_id}-${idx}`} className="hover:bg-zinc-800/40">
+                        <td className="px-4 py-3 font-semibold text-white whitespace-nowrap">
+                          #{idx + 1}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-white whitespace-nowrap">
+                          <div>{item.model_name || item.model_id}</div>
+                          <div className="font-mono text-xs text-zinc-500">
+                            {item.model_id}
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap font-mono font-bold text-emerald-400">
+                          <div>
+                            {formatMetricValue(
+                              item.primary_metric_name,
+                              item.primary_metric_value,
+                            )}
+                          </div>
+                          <span className="text-[10px] text-zinc-500 font-sans font-normal">
+                            {formatMetricName(item.primary_metric_name)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-xs text-zinc-300">
+                          {formatLatency(item.avg_latency_ms)}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-xs text-zinc-300">
+                          {/* Model-weight estimate from catalog, not measured peak */}
+                          <span title="Estimated model-weight footprint (catalog), not measured peak inference VRAM">
+                            {formatVram(item.vram_weight_gb)}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap font-mono text-xs text-zinc-400">
+                          {item.sample_count ?? "—"}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs text-indigo-400 whitespace-nowrap">
+                          <Link
+                            href={`/benchmarks/${item.run_id}`}
+                            className="hover:underline"
+                          >
+                            {item.run_id.slice(0, 8)}...
+                          </Link>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-zinc-500 whitespace-nowrap">
+                          {formatDate(item.completed_at)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ))}
         </div>
       )}
     </div>

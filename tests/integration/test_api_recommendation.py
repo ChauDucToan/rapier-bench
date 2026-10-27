@@ -116,7 +116,10 @@ def test_hardware_and_quality_filtering(client: TestClient, db_session: Session)
     assert data["status"] == "success"
     assert data["eligible_count"] == 1
     assert len(data["recommendations"]) == 1
-    assert any("small comparison set" in lim for lim in data["limitations"])
+    assert any(
+        ("small comparison set" in lim) or ("at least 2 comparable models" in lim)
+        for lim in data["limitations"]
+    )
 
 
 def test_zero_eligible_models_response(client: TestClient, db_session: Session):
@@ -188,7 +191,10 @@ def test_insufficient_sample_under_three_models(client: TestClient, db_session: 
     assert data["status"] == "success"
     assert data["eligible_count"] == 2
     assert len(data["recommendations"]) == 2
-    assert any("small comparison set" in lim for lim in data["limitations"])
+    assert any(
+        ("small comparison set" in lim) or ("at least 2 comparable models" in lim)
+        for lim in data["limitations"]
+    )
 
 
 def test_missing_metrics_excluded_never_invented(client: TestClient, db_session: Session):

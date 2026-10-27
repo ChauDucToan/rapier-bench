@@ -25,10 +25,10 @@ class RecommendationModelBreakdown(BaseModel):
     model_name: str
     composite_score: float
     quality_score: float
-    latency_ms: float
+    latency_ms: float | None = None
     vram_gb: float
     normalized_quality: float
-    normalized_latency: float
+    normalized_latency: float | None = None
     normalized_vram: float
     run_id: str
 

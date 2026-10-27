@@ -160,9 +160,20 @@ export interface LeaderboardItem {
   completed_at?: string | null;
 }
 
+export interface LeaderboardGroup {
+  dataset_id: string;
+  protocol_id: string;
+  split: string;
+  sample_count?: number | null;
+  primary_metric_name: string;
+  cohort_id?: string;
+  items: LeaderboardItem[];
+}
+
 export interface LeaderboardResponse {
   domain?: string | null;
   task_type?: string | null;
+  groups: LeaderboardGroup[];
   items: LeaderboardItem[];
   total: number;
 }

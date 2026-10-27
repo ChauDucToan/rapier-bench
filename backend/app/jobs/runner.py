@@ -79,10 +79,23 @@ def main() -> None:
                 db.commit()
                 sys.exit(1)
 
-        # Mark RUNNING
-        run.status = RunStatusEnum.RUNNING
-        run.started_at = utcnow()
+        # Mark RUNNING — guarded: a run cancelled while queued must never be
+        # flipped back to RUNNING by the worker that missed the cancel.
+        running = db.execute(
+            update(BenchmarkRun)
+            .where(
+                BenchmarkRun.id == run_id,
+                BenchmarkRun.cancel_requested.is_(False),
+                BenchmarkRun.status.in_([RunStatusEnum.QUEUED, RunStatusEnum.RUNNING]),
+            )
+            .values(status=RunStatusEnum.RUNNING, started_at=utcnow())
+        )
         db.commit()
+        if running.rowcount == 0:
+            db.refresh(run)
+            if run.status not in (RunStatusEnum.QUEUED, RunStatusEnum.RUNNING):
+                sys.exit(0)  # terminal (e.g. cancelled while queued)
+            # else: cancel_requested path handled by cancel_check loops.
 
         # Lazy import of benchmark.core.runner
         try:
@@ -201,12 +214,15 @@ def main() -> None:
                         print(f"Warning: could not read {rc_file}: {e}", file=sys.stderr)
             # A2: atomic terminal transition. Check-then-set would let a cancel
             # that lands between the read and the write be overwritten by
-            # COMPLETED. Conditional UPDATE keeps cancelled runs CANCELLED.
+            # COMPLETED. Conditional UPDATE keeps cancelled runs CANCELLED,
+            # and the status guard means an already-terminal run (FAILED by
+            # reconciliation or the crash monitor) is never overwritten.
             completed = db.execute(
                 update(BenchmarkRun)
                 .where(
                     BenchmarkRun.id == run_id,
                     BenchmarkRun.cancel_requested.is_(False),
+                    BenchmarkRun.status.in_([RunStatusEnum.QUEUED, RunStatusEnum.RUNNING]),
                 )
                 .values(status=RunStatusEnum.COMPLETED, completed_at=utcnow())
             )
@@ -214,7 +230,10 @@ def main() -> None:
             if completed.rowcount == 0:
                 db.execute(
                     update(BenchmarkRun)
-                    .where(BenchmarkRun.id == run_id)
+                    .where(
+                        BenchmarkRun.id == run_id,
+                        BenchmarkRun.status.in_([RunStatusEnum.QUEUED, RunStatusEnum.RUNNING]),
+                    )
                     .values(status=RunStatusEnum.CANCELLED, completed_at=utcnow())
                 )
                 db.commit()

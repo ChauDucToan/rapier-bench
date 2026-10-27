@@ -63,42 +63,69 @@ class LegalBenchDatasetAdapter(BaseDatasetAdapter):
         total = len(all_samples)
 
         if limit is not None and limit < total:
-            # Deterministic largest-remainder allocation: base quota per subtask,
-            # then distribute the leftover count to the largest fractional
-            # remainders (stable tie-break by subtask name). Guarantees the
-            # selected total equals `limit` exactly without dropping a subtask
-            # that has data (each gets at least 1).
+            # B4/FIX 6: stratified sampling with coverage guarantee.
+            # Policy (documented):
+            #   1. When limit >= number of nonempty subtasks, every nonempty
+            #      subtask contributes at least 1 sample.
+            #   2. Remaining capacity is distributed proportionally to subtask
+            #      size via capped largest-remainder allocation.
+            #   3. When limit < number of nonempty subtasks, covering every
+            #      subtask is mathematically impossible; a deterministic subset
+            #      is chosen by the same proportional rule (largest subtasks
+            #      first, stable tie-break by name).
+            #   4. The selected total always equals `limit` when enough
+            #      eligible data exists (guaranteed by the caller's limit <
+            #      total check plus capacity clamping).
             subtasks = sorted(per_subtask.keys())
-            raw = {s: limit * len(per_subtask[s]) / total for s in subtasks}
-            base = {s: min(int(raw[s]), len(per_subtask[s])) for s in subtasks}
-            # A subtask may round above its own row count; clamp back.
-            for s in subtasks:
-                base[s] = min(base[s], len(per_subtask[s]))
-            leftover = limit - sum(base.values())
-            by_remainder = sorted(
-                subtasks,
-                key=lambda s: (-(raw[s] - int(raw[s])), -len(per_subtask[s]), s),
-            )
-            i = 0
-            safeguard = 0
-            while leftover > 0 and safeguard <= len(subtasks) * 2:
-                s = by_remainder[i % len(subtasks)]
-                if base[s] < len(per_subtask[s]):
-                    base[s] += 1
-                    leftover -= 1
-                i += 1
-                safeguard += 1
+            nonempty = [s for s in subtasks if per_subtask[s]]
+
+            quotas = {s: 0 for s in subtasks}
+            remaining = limit
+            if limit >= len(nonempty):
+                # Coverage first: one per nonempty subtask (capped at size).
+                for s in nonempty:
+                    quotas[s] = min(1, len(per_subtask[s]))
+                remaining = limit - sum(quotas.values())
+
+            # Proportional largest-remainder distribution of the remainder over
+            # subtasks with spare capacity, weight = subtask size.
+            capacity = {s: len(per_subtask[s]) - quotas[s] for s in subtasks}
+            total_capacity = sum(capacity.values())
+            if remaining > 0 and total_capacity > 0:
+                raw = {
+                    s: remaining * capacity[s] / total_capacity
+                    for s in subtasks
+                    if capacity[s] > 0
+                }
+                for s in raw:
+                    add = min(int(raw[s]), capacity[s])
+                    quotas[s] += add
+                    capacity[s] -= add
+                leftover = remaining - sum(int(r) for r in raw.values())
+                by_remainder = sorted(
+                    (s for s in raw),
+                    key=lambda s: (-(raw[s] - int(raw[s])), -len(per_subtask[s]), s),
+                )
+                i = 0
+                while leftover > 0:
+                    s = by_remainder[i % len(by_remainder)]
+                    if capacity[s] > 0:
+                        quotas[s] += 1
+                        capacity[s] -= 1
+                        leftover -= 1
+                    i += 1
 
             selected: list[NormalizedSample] = []
             for subtask in subtasks:
-                quota = base[subtask]
+                quota = quotas[subtask]
                 if quota <= 0:
                     continue
                 sub_selected, _ = select_samples(
                     per_subtask[subtask], subtask, split, seed, quota
                 )
                 selected.extend(sub_selected)
-            # Deterministic global order.
+            # Deterministic global order; trim impossible oversupply (cannot
+            # happen when limit < total, kept as a safety net).
             selected, _ = select_samples(selected, self.config["id"], split, seed, limit)
             return selected
 

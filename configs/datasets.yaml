@@ -134,9 +134,10 @@
     sampling_rule: "SHA256(f'{dataset_id}:{split}:{seed}:{stable_id}')" # Canonical project formula (dataset_id='rajpurkar/squad')
     rejected_alternative: "alvinming/FaithEval-unanswerable-v1.0-w-original_context REJECTED: answers field contains only refusal strings without extractive gold answers"
   metrics:
-    - "unanswerable_context_accuracy"
+    - "unanswerable_context_accuracy_strict"
+    - "unanswerable_context_accuracy_loose"
     - "answerable_control_accuracy"
-    - "balanced_faithfulness_score"
+    - "balanced_score"
   default_protocol_id: "faitheval_unanswerable_v1"
   sampling_modes:
     smoke: 10

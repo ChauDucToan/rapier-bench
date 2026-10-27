@@ -103,3 +103,67 @@ A1, A3, A4, A5, A6, B1, B2, B4, B6, B7, C, D1, D2, D3, E1, E3 (label), E6, F1, F
 ## Independent review round
 
 All P0/P1 fixes were reviewed by an independent GPT Luna xhigh subagent against the actual diff. The reviewer confirmed 4 files OK and raised 8 actionable objections (LegalBench quota undershoot, PID recycling, empty-cohort conflation, FaithEval loose false-positives, log-handle leak, spawn/PID race, protocol selection scope, test gaps). All were fixed in a second pass and re-verified: quota allocation now uses largest-remainder (exact limits pinned by tests), process identity uses `/proc` start-time tokens plus worker self-registration, unverifiable cohorts are excluded from leaderboard/recommendation, standalone refusal tokens only match whole-response answers, log handles close on spawn failure, dominant protocol is per-dataset, and dedicated tests pin each behavior.
+
+---
+
+# Round 3 — Final Correctness Audit (branch `fix/final-correctness`)
+
+**Base:** `6636d43` on `fix/audit-verification`. All findings independently
+reproduced (scratch SQLite DB, quota-allocation simulation) before fixing.
+
+| ID | Finding | Verdict | Evidence | Fix | Tests |
+| -- | ------- | ------- | -------- | --- | ----- |
+| F1 | FaithEval leaderboard fallback labels strict accuracy as `balanced_score` | CONFIRMED (P0) | `leaderboard.py` tried `[balanced_score, unanswerable_context_accuracy_strict]` but always emitted `primary_metric_name=balanced_score` | Fallback removed: runs lacking the dataset's primary metric are excluded; metric name always equals the metric value's source | `TestFaithEvalMetricIntegrity` (3 tests) |
+| F2 | Recommendation selects runs per-model across incompatible cohorts | CONFIRMED (P0) | Per-model largest-cohort pick; three models with disjoint 200-ID sets ranked together | Cohort-first algorithm: partition by (dataset, protocol, split, sorted sample IDs), require ≥2 distinct models, deterministic cohort choice (most models → largest sample set → lexicographic), one run per model inside cohort | `TestCommonCohort` (8 tests, cases A–H) |
+| F3 | Private runs invisible to owner's recommendations | CONFIRMED (P1) | Query had `is_private.is_(False)` only; endpoint had no user dependency | Optional current-user dependency; `is_private=false OR user_id=current_user` visibility filter applied before cohort selection; anonymous = public only; no private IDs in error bodies | `TestPrivateRunVisibility` (3 tests) |
+| F4 | Cross-hardware latency compared as equivalent | CONFIRMED (P1) | Latency weight (default 0.3) directly scored composite; no hardware check; prior report's "no latency ranking" claim was wrong for recommendations | Hardware key = GPU name + CUDA + torch from `hardware_metadata`; latency compared only within one hardware group; mixed cohorts pick the group with most models and disclose the exclusion; missing latency disclosed, weight never silently redistributed; quality-only weights ignore hardware | `TestHardwareLatencyGating` (4 tests) |
+| F5 | Legacy SQLite DBs reject Full mode (`sample_count NOT NULL`) | CONFIRMED (P1) | Scratch legacy-schema DB: `INSERT ... sample_count=NULL` → `IntegrityError: NOT NULL constraint failed`; startup migration only added worker columns | Idempotent table rebuild (`app/db/migrations.py`): create replacement under temp name from current model schema → copy rows → DROP old → RENAME (SQLite rewrites dependent FK references back to `benchmark_runs`); `PRAGMA foreign_keys` toggled on the raw connection before the rebuild transaction (no-op inside one). Independent review caught and fixed the initial version that ran the pragma inside the transaction and left child FKs pointing at the dropped temp table | `tests/integration/test_db_migration.py` (5 tests: legacy upgrade, idempotency, fresh DB, FK preservation, dependent-row survival + enforcement on rebuilt relationship) |
+| F6 | LegalBench quota allocation gives 0 to tiny subtasks | CONFIRMED (P1) | Simulated `[1,1,1,1,1000]` limit 5 → quotas `[0,0,0,0,5]`, contradicting the documented ≥1 guarantee | Coverage-first allocation: 1 per nonempty subtask when `limit >= nonempty count`, then capped largest-remainder over spare capacity; `limit < subtasks` documented as impossible-to-cover with deterministic proportional subset | `tests/unit/test_legalbench_sampling.py` extended (11 tests incl. all required vectors) |
+| F7 | Leaderboard renders one global rank list across cohorts | CONFIRMED (P1) | Flat items sorted by dataset/metric; frontend numbered `#{idx+1}` across the whole response | `LeaderboardGroup` schema: response groups by (dataset, protocol, split, sample IDs); rank implicit per group; frontend renders per-group sections with cohort headers; deprecated flat `items` kept for legacy consumers | `TestLeaderboardCohortGroups` (4 tests) |
+| F8 | NaN/Inf/negative values can produce meaningless scores | CONFIRMED (P1) | No `isfinite` checks; `or`-chain latency fallback | `_finite()` validation on weights and metrics; negative latency/quality runs excluded; zero latency accepted; latency/normalized_latency now nullable (`None` = not measured) | `TestNumericRobustness` (4 tests) |
+| S11 | Terminal-status overwrite race | CONFIRMED (edge) | COMPLETED transition lacked status guard; queued-cancel could be flipped to RUNNING | Both transitions require `status IN (queued, running)` AND `cancel_requested=false`; worker exits when run already terminal | `tests/integration/test_lifecycle_guards.py` (3 tests) |
+
+## Round 3 verification
+
+- Backend: **130 passed** (`pytest tests -q`); ruff clean
+- Frontend: typecheck clean, lint clean, **23 passed**
+- Legacy-DB migration: proven on exact `e05078e` schema with data preservation,
+  idempotent second run, FK integrity, and working Full-mode NULL insert
+- GPU inference: still **PENDING** (no CUDA device in this environment)
+- Docker compose E2E: not executed (browser flow untested)
+
+## Corrections to Round 2 claims
+
+- "No latency ranking exists" (D4/E4) was inaccurate for the recommendation
+  engine: latency weight contributed directly to composite ranking. Fixed by
+  the F4 hardware-cohort policy above.
+
+## Round 3 independent review round
+
+GPT Luna (high) reviewed the integrated diff. Findings and dispositions:
+
+- **Migration FK handling (critical, confirmed):** the first implementation
+  issued `PRAGMA foreign_keys=OFF` inside the rebuild transaction (a no-op in
+  SQLite) and `ALTER TABLE ... RENAME` rewrote child FK references to the temp
+  table name, which was then dropped. Fixed with the temp-name rebuild
+  procedure verified against SQLite 3.53: create replacement from the current
+  model schema under `benchmark_runs_new`, copy, DROP old, RENAME — SQLite
+  rewrites child references back to `benchmark_runs`. Dependent-row survival
+  and post-rebuild FK enforcement are now covered by tests.
+- **Dependent-row coverage gap (confirmed):** migration tests seeded only
+  `benchmark_runs`. Fixed: legacy fixture now seeds `benchmark_metrics` and
+  `artifacts` rows; test asserts survival, linkage, and enforcement.
+- **Effective-weight explanation (confirmed):** response claimed the original
+  latency weight even when latency was omitted. Fixed: explanation now states
+  the omission or the effective weights.
+- **Single-model-after-constraints labeling (confirmed):** result is returned
+  for completeness but explicitly labeled "not a recommendation".
+- **Per-candidate `_finite` (confirmed):** malformed stored metric values now
+  exclude the candidate instead of failing the whole request; weight validation
+  still rejects non-finite inputs with 400.
+- **Leaderboard group React-key collision (confirmed):** groups now carry a
+  `cohort_id` (SHA-256 of the exact sample IDs); frontend key uses it.
+- **Leaderboard sample-ID normalization (confirmed):** IDs normalized to
+  strings before cohort-key construction, matching the recommendation engine.
+- False positive: reviewer's `cd backend && pytest` invocation — tests live at
+  repository root `tests/`; suite runs green (`130 passed`).

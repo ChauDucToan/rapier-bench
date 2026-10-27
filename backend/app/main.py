@@ -8,6 +8,7 @@ from sqlalchemy import text
 from app.api import api_v1_router
 from app.config import settings
 from app.db.base import Base
+from app.db.migrations import run_startup_migrations
 from app.db.session import SessionLocal, engine
 from app.services.benchmark_service import BenchmarkService
 
@@ -16,18 +17,9 @@ from app.services.benchmark_service import BenchmarkService
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # 1. Create tables & enable SQLite foreign keys
     Base.metadata.create_all(bind=engine)
-    # ponytail: inline ALTER-TABLE migrations; upgrade to Alembic when schema
-    # churn grows beyond a handful of columns.
-    with engine.begin() as conn:
-        _cols = {r[1] for r in conn.exec_driver_sql("PRAGMA table_info(benchmark_runs)")}
-        if "worker_pid" not in _cols:
-            conn.exec_driver_sql(
-                "ALTER TABLE benchmark_runs ADD COLUMN worker_pid INTEGER"
-            )
-        if "worker_start_ts" not in _cols:
-            conn.exec_driver_sql(
-                "ALTER TABLE benchmark_runs ADD COLUMN worker_start_ts VARCHAR(64)"
-            )
+    # ponytail: inline SQLite migrations; upgrade to Alembic when schema churn
+    # grows beyond a handful of columns.
+    run_startup_migrations(engine)
     with SessionLocal() as db:
         if settings.DATABASE_URL.startswith("sqlite"):
             db.execute(text("PRAGMA foreign_keys=ON;"))
@@ -36,7 +28,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # 3. Reconcile stale runs per ARCHITECTURE §6.4 & clear GPU lock
         BenchmarkService.reconcile_stale_runs(db)
     yield
-
 
 def create_app() -> FastAPI:
     app = FastAPI(
@@ -61,6 +52,5 @@ def create_app() -> FastAPI:
     app.include_router(api_v1_router)
 
     return app
-
 
 app = create_app()

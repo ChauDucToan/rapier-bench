@@ -400,7 +400,9 @@ export default function RecommendPage() {
                             {formatLatency(cand.latency_ms)}
                           </dd>
                           <span className="text-[10px] text-zinc-600 font-mono">
-                            Norm: {cand.normalized_latency.toFixed(2)}
+                            {cand.normalized_latency !== null && cand.normalized_latency !== undefined
+                              ? `Norm: ${cand.normalized_latency.toFixed(2)}`
+                              : "Not measured"}
                           </span>
                         </div>
 
