@@ -159,6 +159,31 @@ def main() -> None:
             print(f"Failed to import benchmark.core.runner: {e}", file=sys.stderr)
             sys.exit(1)
 
+        # Device selection: prefer CUDA when a GPU is actually available,
+        # otherwise fall back to CPU so the stack still runs benchmarks on
+        # machines (and Docker containers) without a GPU. CUDA detection uses
+        # torch.cuda.is_available via a subprocess probe — importing torch
+        # in-process here previously segfaulted under the test suite's patched
+        # sys.modules environment, and the model adapter re-checks
+        # availability at load time anyway (raises RuntimeError if cuda was
+        # requested without a device).
+        import subprocess as _sp
+
+        def _cuda_available() -> bool:
+            try:
+                probe = _sp.run(
+                    [sys.executable, "-c", "import torch;print(int(torch.cuda.is_available()))"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
+                    check=False,
+                )
+                return probe.returncode == 0 and probe.stdout.strip() == "1"
+            except Exception:
+                return False
+
+        device = "cuda" if _cuda_available() else "cpu"
+
         # Call benchmark execution
         artifacts_path = settings.artifacts_path / run_id
         artifacts_path.mkdir(parents=True, exist_ok=True)
@@ -180,7 +205,7 @@ def main() -> None:
                 seed=run.seed,
                 protocol_id=run.protocol_id,
                 artifacts_dir=str(settings.artifacts_path),
-                device="cuda",
+                device=device,
                 progress_callback=progress_cb,
                 cancel_check=cancel_check,
             )
